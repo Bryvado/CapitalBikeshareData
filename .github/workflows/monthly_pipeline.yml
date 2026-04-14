@@ -85,7 +85,7 @@ jobs:
         run: |
           source("R/pipeline.R")
           year  <- if (nzchar(Sys.getenv("PIPELINE_YEAR")))
-                     as.integer(Sys.getenv("PIPELINE_YEAR"))  else NULL
+                     as.integer(Sys.getenv("PIPELINE_YEAR")) else NULL
           month <- if (nzchar(Sys.getenv("PIPELINE_MONTH")))
                      as.integer(Sys.getenv("PIPELINE_MONTH")) else NULL
           run_pipeline(year = year, month = month)

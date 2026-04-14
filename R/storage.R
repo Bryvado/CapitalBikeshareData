@@ -98,7 +98,7 @@ s3_object_exists <- function(key) {
 #' @export
 s3_upload_file <- function(local_path, key) {
   con <- file(local_path, open = "rb")
-  on.exit(close(con))
+  on.exit(close(con), add = TRUE)
   s3_client()$put_object(
     Bucket = s3_bucket(),
     Key    = key,
@@ -167,7 +167,7 @@ s3_read_csv <- function(key, ...) {
 #' @export
 s3_write_csv <- function(df, key) {
   tmp <- tempfile(fileext = ".csv")
-  on.exit(unlink(tmp))
+  on.exit(unlink(tmp), add = TRUE)
   readr::write_csv(df, tmp)
   s3_upload_file(tmp, key)
   invisible(key)
@@ -184,7 +184,7 @@ s3_write_csv <- function(df, key) {
 #' @export
 s3_read_parquet <- function(key) {
   tmp <- tempfile(fileext = ".parquet")
-  on.exit(unlink(tmp))
+  on.exit(unlink(tmp), add = TRUE)
   s3_download_file(key, tmp)
   arrow::read_parquet(tmp)
 }
@@ -196,7 +196,7 @@ s3_read_parquet <- function(key) {
 #' @export
 s3_write_parquet <- function(df, key) {
   tmp <- tempfile(fileext = ".parquet")
-  on.exit(unlink(tmp))
+  on.exit(unlink(tmp), add = TRUE)
   arrow::write_parquet(df, tmp)
   s3_upload_file(tmp, key)
   invisible(key)
