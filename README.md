@@ -2,14 +2,25 @@
 
 A modular, production-ready R pipeline that monitors S3 for new Capital Bikeshare trip-data ZIP files, downloads and cleans them, enriches missing coordinates via the GBFS station feed, and appends validated data to master parquet datasets.
 
+The pipeline supports two storage backends:
+
+| Mode | When active | Artefact location |
+|---|---|---|
+| **Local** (default) | `CBS_S3_BUCKET` not set | `data/`, `manifest.csv`, `logs/` on disk |
+| **S3** | `CBS_S3_BUCKET` set | All artefacts in your S3 bucket |
+
 ---
 
 ## Folder structure
 
 ```
 CapitalBikeshareData/
+├── .github/
+│   └── workflows/
+│       └── monthly_pipeline.yml  # Scheduled GitHub Actions workflow
 ├── R/
 │   ├── utils.R          # Logging, retry, path helpers
+│   ├── storage.R        # S3 abstraction layer (use_s3(), key helpers, locking)
 │   ├── downloader.R     # URL prediction, S3 polling, download, unzip
 │   ├── schema.R         # Schema detection, standardisation, validation
 │   ├── enrichment.R     # GBFS station reference, coordinate fill, ride_type
@@ -25,6 +36,19 @@ CapitalBikeshareData/
 │   └── pipeline.log     # Unified log file (appended each run)
 ├── manifest.csv         # Processing manifest (idempotency record)
 └── run_cbs_pipeline.R   # Auto-generated monthly driver script
+```
+
+In S3 mode the bucket mirrors the same structure:
+
+```
+s3://<CBS_S3_BUCKET>/<CBS_S3_PREFIX>/
+├── data/
+│   ├── processed/<label>/<label>_trips.parquet
+│   ├── master/old_era.parquet
+│   ├── master/new_era.parquet
+│   └── station_reference.csv
+├── manifest.csv
+└── locks/pipeline.lock   # Ephemeral run lock (deleted after each run)
 ```
 
 ---
@@ -46,6 +70,8 @@ install.packages(c(
   "logger",       # Structured logging
   "fs",           # File-system utilities
   "tibble",       # Tibble construction
+  # S3 backend (only needed when CBS_S3_BUCKET is set):
+  "paws.storage", # AWS SDK for R — S3 operations
   # Scheduling (choose one based on OS):
   "cronR",        # Linux / macOS cron scheduling
   "taskscheduleR" # Windows Task Scheduler
@@ -77,6 +103,85 @@ source("R/downloader.R")
 source("R/pipeline.R")
 # The 2014 file uses year-only naming; pass year=2014, month=1
 run_pipeline(year = 2014, month = 1)
+```
+
+---
+
+## Running without a local machine — GitHub Actions + S3
+
+The pipeline can run fully unattended on GitHub Actions, writing every
+artefact to an S3 bucket so nothing needs to be kept on your machine.
+
+### 1 · Create an S3 bucket
+
+Create a private S3 bucket in any AWS region.  The IAM user (or role) you
+create for the pipeline needs the following permissions on that bucket:
+
+```json
+{
+  "Effect": "Allow",
+  "Action": [
+    "s3:GetObject",
+    "s3:PutObject",
+    "s3:HeadObject",
+    "s3:DeleteObject",
+    "s3:ListBucket"
+  ],
+  "Resource": [
+    "arn:aws:s3:::<your-bucket>",
+    "arn:aws:s3:::<your-bucket>/*"
+  ]
+}
+```
+
+### 2 · Add GitHub secrets and variables
+
+Go to **Settings → Secrets and variables → Actions** in your fork and add:
+
+| Kind | Name | Value |
+|---|---|---|
+| Secret | `CBS_S3_BUCKET` | Your bucket name, e.g. `my-bikeshare-data` |
+| Secret | `AWS_ACCESS_KEY_ID` | IAM access key |
+| Secret | `AWS_SECRET_ACCESS_KEY` | IAM secret key |
+| Variable | `AWS_REGION` | Bucket region, e.g. `us-east-1` |
+| Variable | `CBS_S3_PREFIX` | *(optional)* key prefix, e.g. `cbs/prod` |
+
+### 3 · Enable the workflow
+
+The workflow file `.github/workflows/monthly_pipeline.yml` is already
+committed.  It fires automatically at **00:01 UTC on the 1st of every
+month**.
+
+You can also trigger it manually from the **Actions** tab with optional
+`year` and `month` inputs to backfill a specific period.
+
+### 4 · S3 artefact layout
+
+```
+s3://<CBS_S3_BUCKET>/<CBS_S3_PREFIX>/
+├── manifest.csv                              ← idempotency record
+├── data/
+│   ├── station_reference.csv                 ← GBFS station cache
+│   ├── processed/<label>/<label>_trips.parquet
+│   └── master/
+│       ├── old_era.parquet
+│       └── new_era.parquet
+└── locks/pipeline.lock                       ← ephemeral run lock
+```
+
+### Using S3 mode locally
+
+Set the same environment variables before calling `run_pipeline()`:
+
+```r
+Sys.setenv(
+  CBS_S3_BUCKET         = "my-bikeshare-data",
+  AWS_REGION            = "us-east-1",
+  AWS_ACCESS_KEY_ID     = "AKIA...",
+  AWS_SECRET_ACCESS_KEY = "..."
+)
+source("R/pipeline.R")
+run_pipeline()
 ```
 
 ---

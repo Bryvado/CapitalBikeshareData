@@ -1,0 +1,91 @@
+# .github/workflows/monthly_pipeline.yml
+# ---------------------------------------------------------------------------
+# Runs the Capital Bikeshare data pipeline on a schedule (1st of each month)
+# and stores all artefacts in an S3 bucket so the pipeline never needs to run
+# on a local machine.
+#
+# Required repository secrets (Settings → Secrets and variables → Actions):
+#   CBS_S3_BUCKET            – destination S3 bucket name
+#   AWS_ACCESS_KEY_ID        – AWS IAM access key with S3 read/write access
+#   AWS_SECRET_ACCESS_KEY    – corresponding secret key
+#
+# Required repository variables (Settings → Secrets and variables → Actions):
+#   AWS_REGION               – AWS region of the bucket, e.g. "us-east-1"
+#   CBS_S3_PREFIX            – (optional) key prefix inside the bucket
+# ---------------------------------------------------------------------------
+
+name: Monthly Capital Bikeshare Pipeline
+
+on:
+  schedule:
+    # Run at 00:01 UTC on the 1st of every month
+    - cron: '1 0 1 * *'
+  workflow_dispatch:
+    inputs:
+      year:
+        description: 'Year to process (leave blank for auto-detect)'
+        required: false
+        type: string
+      month:
+        description: 'Month 1–12 to process (leave blank for auto-detect)'
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  pipeline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+
+    env:
+      CBS_S3_BUCKET:            ${{ secrets.CBS_S3_BUCKET }}
+      CBS_S3_PREFIX:            ${{ vars.CBS_S3_PREFIX }}
+      AWS_REGION:               ${{ vars.AWS_REGION }}
+      AWS_ACCESS_KEY_ID:        ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY:    ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up R
+        uses: r-lib/actions/setup-r@v2
+        with:
+          r-version: '4.4'
+          use-public-rspm: true
+
+      - name: Cache R packages
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.R_LIBS_USER }}
+          key: ${{ runner.os }}-r-4.4-${{ hashFiles('R/*.R') }}
+          restore-keys: |
+            ${{ runner.os }}-r-4.4-
+
+      - name: Install R packages
+        shell: Rscript {0}
+        run: |
+          needed <- c(
+            "httr2", "arrow", "dplyr", "readr", "lubridate",
+            "stringr", "stringdist", "jsonlite", "logger",
+            "fs", "tibble", "paws.storage"
+          )
+          missing_pkgs <- needed[!needed %in% installed.packages()[, "Package"]]
+          if (length(missing_pkgs) > 0) {
+            install.packages(missing_pkgs, repos = "https://cloud.r-project.org")
+          }
+
+      - name: Run pipeline
+        shell: Rscript {0}
+        env:
+          PIPELINE_YEAR:  ${{ inputs.year }}
+          PIPELINE_MONTH: ${{ inputs.month }}
+        run: |
+          source("R/pipeline.R")
+          year  <- if (nzchar(Sys.getenv("PIPELINE_YEAR")))
+                     as.integer(Sys.getenv("PIPELINE_YEAR")) else NULL
+          month <- if (nzchar(Sys.getenv("PIPELINE_MONTH")))
+                     as.integer(Sys.getenv("PIPELINE_MONTH")) else NULL
+          run_pipeline(year = year, month = month)

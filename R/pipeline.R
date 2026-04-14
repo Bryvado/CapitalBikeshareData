@@ -12,6 +12,7 @@ suppressPackageStartupMessages({
   library(fs)
 })
 
+source("R/storage.R")
 source("R/utils.R")
 source("R/downloader.R")
 source("R/schema.R")
@@ -54,6 +55,17 @@ run_pipeline <- function(year           = NULL,
 
   init_logger(log_dir = file.path(root, "logs"))
   logger::log_info("=== Capital Bikeshare Pipeline START ===")
+
+  # ------------------------------------------------------------------
+  # Run-level locking (S3 mode only) — prevents concurrent executions.
+  # The lock is released automatically via on.exit even on error.
+  # ------------------------------------------------------------------
+  if (use_s3()) {
+    if (!acquire_run_lock()) {
+      stop("Another pipeline run is currently in progress — exiting.")
+    }
+    on.exit(release_run_lock(), add = TRUE)
+  }
 
   # ------------------------------------------------------------------
   # 1. Determine target file

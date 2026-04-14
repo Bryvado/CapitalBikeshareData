@@ -14,6 +14,7 @@ suppressPackageStartupMessages({
 })
 
 source("R/utils.R")
+source("R/storage.R")
 
 GBFS_STATION_URL <-
   "https://gbfs.capitalbikeshare.com/gbfs/en/station_information.json"
@@ -24,9 +25,17 @@ GBFS_STATION_URL <-
 
 #' Fetch the current Capital Bikeshare station reference from the GBFS feed.
 #'
+#' Cache priority:
+#'   1. Live GBFS network call (always attempted first).
+#'   2. S3 cache (`CBS_S3_BUCKET` set and object exists) — used as fallback.
+#'   3. Local file cache (`cache_path`) — used as final fallback.
+#'
+#' When the live call succeeds the result is written to both the local cache
+#' and, in S3 mode, the S3 bucket.
+#'
 #' @param url   GBFS station_information URL.
-#' @param cache_path  Optional path to a local cache CSV; re-used when the
-#'                    remote call fails and a cached copy is present.
+#' @param cache_path  Path to a local cache CSV; re-used when the remote call
+#'                    fails and no S3 cache is available.
 #' @return A tibble with columns: station_id (chr), name (chr),
 #'         lat (dbl), lon (dbl), capacity (int).
 #' @export
@@ -70,9 +79,24 @@ fetch_station_reference <- function(
     fs::dir_create(dirname(cache_path))
     readr::write_csv(stations, cache_path)
     logger::log_info("Station reference refreshed: {nrow(stations)} stations")
+    # Also cache in S3 when backend is configured
+    if (use_s3()) {
+      s3_write_csv(stations, s3_key_station_reference())
+      logger::log_info("Station reference cached to S3")
+    }
     return(stations)
   }
 
+  # Fallback 1: S3 cache
+  if (use_s3()) {
+    key <- s3_key_station_reference()
+    if (s3_object_exists(key)) {
+      logger::log_warn("Using S3-cached station reference")
+      return(s3_read_csv(key))
+    }
+  }
+
+  # Fallback 2: local file cache
   if (file.exists(cache_path)) {
     logger::log_warn("Using cached station reference from {cache_path}")
     return(readr::read_csv(cache_path, show_col_types = FALSE))
