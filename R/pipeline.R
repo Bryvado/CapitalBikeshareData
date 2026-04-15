@@ -39,15 +39,18 @@ source("R/parquet.R")
 #'
 #' @param year             Integer year to process, or NULL to auto-detect next.
 #' @param month            Integer month (1-12), or NULL to auto-detect.
+#' @param all_available    Logical; when TRUE, process every available file.
 #' @param root             Project root directory.
 #' @param poll_interval    Seconds between S3 existence polls (default 900).
 #' @param poll_timeout     Total seconds to wait for the file (default 30 days).
 #' @param fuzzy_threshold  Jaro-Winkler threshold for station fuzzy-matching.
 #' @return Invisibly, the path to the per-month parquet that was written.
 #'         Returns NULL if the month was already processed (skipped).
+#'         When `all_available = TRUE`, returns a character vector of outputs.
 #' @export
 run_pipeline <- function(year           = NULL,
                          month          = NULL,
+                         all_available  = FALSE,
                          root           = ".",
                          poll_interval  = 900L,
                          poll_timeout   = 30L * 24L * 3600L,
@@ -55,6 +58,33 @@ run_pipeline <- function(year           = NULL,
 
   init_logger(log_dir = file.path(root, "logs"))
   logger::log_info("=== Capital Bikeshare Pipeline START ===")
+
+  if (isTRUE(all_available)) {
+    if (!is.null(year) || !is.null(month)) {
+      stop("`all_available = TRUE` cannot be combined with `year` or `month`.")
+    }
+
+    targets <- available_cbs_files()
+    if (length(targets) == 0L) {
+      logger::log_warn("No available Capital Bikeshare files were found.")
+      return(invisible(character()))
+    }
+
+    logger::log_info("Processing all available files: {length(targets)} target(s)")
+    outputs <- unlist(lapply(targets, function(target) {
+      run_pipeline(
+        year            = target$year,
+        month           = target$month,
+        all_available   = FALSE,
+        root            = root,
+        poll_interval   = poll_interval,
+        poll_timeout    = poll_timeout,
+        fuzzy_threshold = fuzzy_threshold
+      )
+    }), use.names = FALSE)
+
+    return(invisible(outputs))
+  }
 
   # ------------------------------------------------------------------
   # Run-level locking (S3 mode only) — prevents concurrent executions.

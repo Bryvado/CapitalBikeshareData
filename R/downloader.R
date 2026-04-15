@@ -96,6 +96,61 @@ next_expected_file <- function(current_year = NULL, current_month = NULL) {
        url      = cbs_url(fname))
 }
 
+#' List all currently available Capital Bikeshare ZIP files.
+#'
+#' Checks annual files for 2010-2017 and monthly files for 2018+ by probing
+#' S3 URLs with HTTP HEAD requests.
+#'
+#' @param start_year Integer first year to check (default 2010).
+#' @param end_year   Integer last year to check (default current year).
+#' @return A list of named lists with fields: year, month, filename, url.
+#' @export
+available_cbs_files <- function(start_year = 2010L, end_year = NULL) {
+  start_year <- as.integer(start_year)
+  if (is.null(end_year)) {
+    end_year <- as.integer(format(Sys.Date(), "%Y"))
+  }
+  end_year <- as.integer(end_year)
+
+  if (start_year < 2010L) stop("start_year must be >= 2010")
+  if (end_year < start_year) return(list())
+
+  today_year  <- as.integer(format(Sys.Date(), "%Y"))
+  today_month <- as.integer(format(Sys.Date(), "%m"))
+  targets <- list()
+
+  annual_end <- min(end_year, 2017L)
+  if (start_year <= annual_end) {
+    for (yy in start_year:annual_end) {
+      fname <- cbs_filename(yy, 1L)
+      url   <- cbs_url(fname)
+      if (url_exists(url)) {
+        targets[[length(targets) + 1L]] <- list(
+          year = yy, month = 1L, filename = fname, url = url
+        )
+      }
+    }
+  }
+
+  monthly_start <- max(start_year, 2018L)
+  if (monthly_start <= end_year) {
+    for (yy in monthly_start:end_year) {
+      max_month <- if (yy == today_year) today_month else 12L
+      for (mm in seq_len(max_month)) {
+        fname <- cbs_filename(yy, mm)
+        url   <- cbs_url(fname)
+        if (url_exists(url)) {
+          targets[[length(targets) + 1L]] <- list(
+            year = yy, month = mm, filename = fname, url = url
+          )
+        }
+      }
+    }
+  }
+
+  targets
+}
+
 # Null-coalescing operator (available in R 4.4+ as ??, replicated here)
 `%||%` <- function(a, b) if (!is.null(a)) a else b
 
