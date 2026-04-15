@@ -96,13 +96,13 @@ source("R/pipeline.R")
 run_pipeline(year = 2024, month = 5)
 ```
 
-### Run for the historic 2014 annual file
+### Run for a historic annual file (2010–2017)
 
 ```r
 source("R/downloader.R")
 source("R/pipeline.R")
-# The 2014 file uses year-only naming; pass year=2014, month=1
-run_pipeline(year = 2014, month = 1)
+# Early historical files use year-only naming; pass month=1 as placeholder
+run_pipeline(year = 2012, month = 1)
 ```
 
 ---
@@ -215,12 +215,11 @@ unschedule_with_taskscheduler()
 
 ### 1 · URL prediction (`R/downloader.R`)
 
-Capital Bikeshare uses three naming conventions:
+Capital Bikeshare uses two naming conventions:
 
 | Period   | Pattern                                        |
 |----------|------------------------------------------------|
-| 2014     | `2014-capitalbikeshare-tripdata.zip`           |
-| 2015–2017| `YYYYQN-capitalbikeshare-tripdata.zip`         |
+| 2010–2017| `YYYY-capitalbikeshare-tripdata.zip`           |
 | 2018+    | `YYYYMM-capitalbikeshare-tripdata.zip`         |
 
 `next_expected_file()` advances the calendar by one month and builds the correct filename.  `poll_until_available()` then issues HTTP HEAD requests every 15 minutes until the server responds with 200.
