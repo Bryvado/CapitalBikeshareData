@@ -243,3 +243,19 @@ download_and_unzip <- function(url, dest_dir, n_retries = 3L) {
   logger::log_info("Extracted {length(extracted)} file(s) to {dest_dir}")
   extracted
 }
+
+#' Extract an existing local ZIP file into a destination directory.
+#'
+#' @param zip_file  Path to an existing local ZIP file.
+#' @param dest_dir  Local directory for extracted files.
+#' @return Character vector of extracted file paths.
+#' @export
+unzip_existing_zip <- function(zip_file, dest_dir) {
+  if (!fs::file_exists(zip_file)) {
+    stop(sprintf("ZIP file does not exist: %s", zip_file))
+  }
+  fs::dir_create(dest_dir)
+  extracted <- unzip(zip_file, exdir = dest_dir)
+  logger::log_info("Extracted {length(extracted)} file(s) from existing ZIP to {dest_dir}")
+  extracted
+}
