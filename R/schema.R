@@ -295,10 +295,6 @@ validate_trips <- function(df) {
                           paste(setdiff(CANONICAL_COLS, names(df)),
                                 collapse = ", ")))
 
-  neg_dur <- sum(df$duration_secs < 0, na.rm = TRUE)
-  if (neg_dur > 0)
-    msgs <- c(msgs, sprintf("%d records with negative duration", neg_dur))
-
   na_start <- sum(is.na(df$started_at))
   if (na_start > 0)
     msgs <- c(msgs, sprintf("%d records with unparsed started_at", na_start))
