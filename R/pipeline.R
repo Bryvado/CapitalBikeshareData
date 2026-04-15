@@ -192,7 +192,7 @@ run_pipeline <- function(year           = NULL,
   # 5b. Drop records with negative duration (data quality, not a fatal error)
   # ------------------------------------------------------------------
   neg_n    <- sum(!is.na(trips$duration_secs) & trips$duration_secs < 0)
-  neg_rate <- neg_n / nrow(trips)
+  neg_rate <- if (nrow(trips) > 0L) neg_n / nrow(trips) else 0
 
   if (neg_rate > 0.01) {
     stop(sprintf(
