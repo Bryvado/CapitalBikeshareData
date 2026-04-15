@@ -194,18 +194,18 @@ run_pipeline <- function(year           = NULL,
   neg_n    <- sum(!is.na(trips$duration_secs) & trips$duration_secs < 0)
   neg_rate <- neg_n / nrow(trips)
 
-  if (neg_n > 0) {
-    logger::log_warn(
-      "Dropping {neg_n} record(s) with negative duration ({round(100 * neg_rate, 3)}%)"
-    )
-    trips <- dplyr::filter(trips, is.na(duration_secs) | duration_secs >= 0)
-  }
-
   if (neg_rate > 0.01) {
     stop(sprintf(
       "Negative-duration rate too high (%.1f%% > 1%%) — investigate source data",
       100 * neg_rate
     ))
+  }
+
+  if (neg_n > 0) {
+    logger::log_warn(
+      "Dropping {neg_n} record(s) with negative duration ({round(100 * neg_rate, 3)}%)"
+    )
+    trips <- dplyr::filter(trips, is.na(duration_secs) | duration_secs >= 0)
   }
 
   # ------------------------------------------------------------------
