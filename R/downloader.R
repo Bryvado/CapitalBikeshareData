@@ -262,7 +262,7 @@ unzip_existing_zip <- function(zip_file, dest_dir) {
   ]
   if (length(existing_csv) > 0L) {
     logger::log_info("CSV files already extracted in {dest_dir} — skipping extraction")
-    return(existing_files[existing_files != zip_file])
+    return(existing_csv)
   }
   extracted <- unzip(zip_file, exdir = dest_dir, overwrite = TRUE)
   logger::log_info("Extracted {length(extracted)} file(s) from existing ZIP to {dest_dir}")
