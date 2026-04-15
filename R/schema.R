@@ -190,6 +190,13 @@ read_old_schema <- function(csv_path) {
         duration_secs
       )
     ) |>
+    dplyr::mutate(
+      duration_secs = dplyr::if_else(
+        !is.na(duration_secs) & duration_secs < 0,
+        NA_real_,
+        duration_secs
+      )
+    ) |>
     dplyr::select(dplyr::any_of(CANONICAL_COLS))
 }
 
@@ -236,6 +243,13 @@ read_new_schema <- function(csv_path) {
       user_type         = normalise_user_type(user_type),
       source_file       = basename(csv_path),
       era               = "new"
+    ) |>
+    dplyr::mutate(
+      duration_secs = dplyr::if_else(
+        !is.na(duration_secs) & duration_secs < 0,
+        NA_real_,
+        duration_secs
+      )
     ) |>
     dplyr::select(dplyr::any_of(CANONICAL_COLS))
 }
