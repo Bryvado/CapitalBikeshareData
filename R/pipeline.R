@@ -189,7 +189,7 @@ run_pipeline <- function(year           = NULL,
   logger::log_info("Parsed {nrow(trips)} rows, era={era}")
 
   # ------------------------------------------------------------------
-  # 5.5. Drop records with negative duration (data quality, not a fatal error)
+  # 5b. Drop records with negative duration (data quality, not a fatal error)
   # ------------------------------------------------------------------
   neg_n    <- sum(!is.na(trips$duration_secs) & trips$duration_secs < 0)
   neg_rate <- neg_n / nrow(trips)
