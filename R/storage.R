@@ -248,6 +248,8 @@ s3_key_lock <- function() s3_key("locks", "pipeline.lock")
 # Run-level locking (prevents concurrent pipeline runs)
 # ---------------------------------------------------------------------------
 
+DEFAULT_LOCK_MAX_AGE_SECS <- 2L * 60L * 60L  # 2 hours
+
 #' Attempt to acquire a run lock via an S3 sentinel object.
 #'
 #' The lock is a small JSON object that records the start time and the GitHub
@@ -256,11 +258,46 @@ s3_key_lock <- function() s3_key("locks", "pipeline.lock")
 #'
 #' @return TRUE on success; FALSE when the lock is already held.
 #' @export
-acquire_run_lock <- function() {
+acquire_run_lock <- function(lock_max_age_secs = DEFAULT_LOCK_MAX_AGE_SECS) {
+  raw_lock_max_age_secs <- lock_max_age_secs
+  lock_max_age_secs <- if (is.numeric(lock_max_age_secs)) {
+    lock_max_age_secs[1]
+  } else {
+    tryCatch(
+      as.numeric(lock_max_age_secs),
+      warning = function(w) NA_real_,
+      error = function(e) NA_real_
+    )
+  }
+  if (!is.finite(lock_max_age_secs) || lock_max_age_secs <= 0) {
+    logger::log_warn(
+      "Invalid lock_max_age_secs value '{raw_lock_max_age_secs}'; defaulting to {DEFAULT_LOCK_MAX_AGE_SECS} seconds."
+    )
+    lock_max_age_secs <- DEFAULT_LOCK_MAX_AGE_SECS
+  }
+
   key <- s3_key_lock()
   if (s3_object_exists(key)) {
-    logger::log_warn("Run lock already held at s3://{s3_bucket()}/{key}")
-    return(FALSE)
+    lock_age_secs <- tryCatch({
+      head <- s3_client()$head_object(Bucket = s3_bucket(), Key = key)
+      as.numeric(difftime(Sys.time(), head$LastModified, units = "secs"))
+    }, error = function(e) NA_real_)
+
+    if (!is.na(lock_age_secs) && lock_age_secs > lock_max_age_secs) {
+      logger::log_warn(
+        "Stale run lock detected (age: {round(lock_age_secs)}s), removing: s3://{s3_bucket()}/{key}"
+      )
+      tryCatch(
+        s3_client()$delete_object(Bucket = s3_bucket(), Key = key),
+        error = function(e)
+          logger::log_warn("Failed to remove stale run lock: {conditionMessage(e)}")
+      )
+    }
+
+    if (s3_object_exists(key)) {
+      logger::log_warn("Run lock already held at s3://{s3_bucket()}/{key}")
+      return(FALSE)
+    }
   }
   info <- jsonlite::toJSON(list(
     locked_at = format(Sys.time(), "%Y-%m-%dT%H:%M:%SZ"),

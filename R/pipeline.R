@@ -70,7 +70,11 @@ run_pipeline <- function(year           = NULL,
   # Acquire only at top-level to avoid re-entrant lock conflicts.
   # ------------------------------------------------------------------
   if (use_s3() && !isTRUE(.lock_held)) {
-    if (!acquire_run_lock()) {
+    lock_max_age_raw <- Sys.getenv(
+      "CBS_LOCK_MAX_AGE_SECS",
+      unset = as.character(DEFAULT_LOCK_MAX_AGE_SECS)
+    )
+    if (!acquire_run_lock(lock_max_age_secs = lock_max_age_raw)) {
       stop("Another pipeline run is currently in progress — exiting.")
     }
     on.exit(release_run_lock(), add = TRUE)
