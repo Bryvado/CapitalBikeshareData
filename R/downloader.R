@@ -217,9 +217,10 @@ poll_until_available <- function(url,
 #' @param url       Full S3 URL.
 #' @param dest_dir  Local directory for the ZIP and extracted files.
 #' @param n_retries Number of download retries on transient failure.
+#' @param overwrite Logical; whether extracted files may overwrite existing files.
 #' @return Character vector of extracted file paths.
 #' @export
-download_and_unzip <- function(url, dest_dir, n_retries = 3L) {
+download_and_unzip <- function(url, dest_dir, n_retries = 3L, overwrite = TRUE) {
   fs::dir_create(dest_dir)
   zip_file <- file.path(dest_dir, basename(url))
 
@@ -239,7 +240,7 @@ download_and_unzip <- function(url, dest_dir, n_retries = 3L) {
     logger::log_info("ZIP already present, skipping download: {zip_file}")
   }
 
-  extracted <- unzip(zip_file, exdir = dest_dir, overwrite = TRUE)
+  extracted <- unzip(zip_file, exdir = dest_dir, overwrite = overwrite)
   logger::log_info("Extracted {length(extracted)} file(s) to {dest_dir}")
   extracted
 }
