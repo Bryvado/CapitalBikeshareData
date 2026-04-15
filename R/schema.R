@@ -192,7 +192,7 @@ read_old_schema <- function(csv_path) {
     ) |>
     dplyr::mutate(
       duration_secs = dplyr::if_else(
-        !is.na(duration_secs) & duration_secs < 0,
+        duration_secs < 0,
         NA_real_,
         duration_secs
       )
@@ -246,7 +246,7 @@ read_new_schema <- function(csv_path) {
     ) |>
     dplyr::mutate(
       duration_secs = dplyr::if_else(
-        !is.na(duration_secs) & duration_secs < 0,
+        duration_secs < 0,
         NA_real_,
         duration_secs
       )
