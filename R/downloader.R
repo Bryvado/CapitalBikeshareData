@@ -239,7 +239,7 @@ download_and_unzip <- function(url, dest_dir, n_retries = 3L) {
     logger::log_info("ZIP already present, skipping download: {zip_file}")
   }
 
-  extracted <- unzip(zip_file, exdir = dest_dir)
+  extracted <- unzip(zip_file, exdir = dest_dir, overwrite = TRUE)
   logger::log_info("Extracted {length(extracted)} file(s) to {dest_dir}")
   extracted
 }
@@ -255,7 +255,16 @@ unzip_existing_zip <- function(zip_file, dest_dir) {
     stop(sprintf("ZIP file does not exist: %s", zip_file))
   }
   fs::dir_create(dest_dir)
-  extracted <- unzip(zip_file, exdir = dest_dir)
+  existing_files <- fs::dir_ls(dest_dir, type = "file")
+  existing_csv <- existing_files[
+    grepl("\\.csv$", existing_files, ignore.case = TRUE) &
+      !startsWith(basename(existing_files), "._")
+  ]
+  if (length(existing_csv) > 0L) {
+    logger::log_info("CSV files already extracted in {dest_dir} — skipping extraction")
+    return(existing_files[existing_files != zip_file])
+  }
+  extracted <- unzip(zip_file, exdir = dest_dir, overwrite = TRUE)
   logger::log_info("Extracted {length(extracted)} file(s) from existing ZIP to {dest_dir}")
   extracted
 }
