@@ -261,6 +261,8 @@ unzip_existing_zip <- function(zip_file, dest_dir, overwrite = TRUE) {
   }
   fs::dir_create(dest_dir)
   zip_listing <- unzip(zip_file, list = TRUE)
+  zip_file_entries <- zip_listing$Name[!endsWith(zip_listing$Name, "/")]
+  expected_file_paths <- file.path(dest_dir, zip_file_entries)
   zip_csv_entries <- zip_listing$Name[
     grepl("\\.csv$", zip_listing$Name, ignore.case = TRUE) &
       !startsWith(basename(zip_listing$Name), "._")
@@ -270,7 +272,7 @@ unzip_existing_zip <- function(zip_file, dest_dir, overwrite = TRUE) {
   if (length(expected_csv_paths) > 0L &&
       all(fs::file_exists(expected_csv_paths))) {
     logger::log_info("Expected CSV files already extracted in {dest_dir} — skipping extraction")
-    return(expected_csv_paths)
+    return(expected_file_paths[fs::file_exists(expected_file_paths)])
   }
   extracted <- unzip(zip_file, exdir = dest_dir, overwrite = overwrite)
   logger::log_info("Extracted {length(extracted)} file(s) from existing ZIP to {dest_dir}")
