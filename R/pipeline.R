@@ -74,18 +74,7 @@ run_pipeline <- function(year           = NULL,
       "CBS_LOCK_MAX_AGE_SECS",
       unset = as.character(DEFAULT_LOCK_MAX_AGE_SECS)
     )
-    lock_max_age_secs <- tryCatch(
-      as.numeric(lock_max_age_raw),
-      warning = function(w) NA_real_,
-      error = function(e) NA_real_
-    )
-    if (!is.finite(lock_max_age_secs) || lock_max_age_secs <= 0) {
-      logger::log_warn(
-        "Invalid CBS_LOCK_MAX_AGE_SECS value '{lock_max_age_raw}'; defaulting to {DEFAULT_LOCK_MAX_AGE_SECS} seconds."
-      )
-      lock_max_age_secs <- DEFAULT_LOCK_MAX_AGE_SECS
-    }
-    if (!acquire_run_lock(lock_max_age_secs = lock_max_age_secs)) {
+    if (!acquire_run_lock(lock_max_age_secs = lock_max_age_raw)) {
       stop("Another pipeline run is currently in progress — exiting.")
     }
     on.exit(release_run_lock(), add = TRUE)

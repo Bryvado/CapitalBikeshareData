@@ -248,7 +248,7 @@ s3_key_lock <- function() s3_key("locks", "pipeline.lock")
 # Run-level locking (prevents concurrent pipeline runs)
 # ---------------------------------------------------------------------------
 
-DEFAULT_LOCK_MAX_AGE_SECS <- 2L * 60L * 60L
+DEFAULT_LOCK_MAX_AGE_SECS <- 2L * 60L * 60L  # 2 hours
 
 #' Attempt to acquire a run lock via an S3 sentinel object.
 #'
@@ -261,7 +261,7 @@ DEFAULT_LOCK_MAX_AGE_SECS <- 2L * 60L * 60L
 acquire_run_lock <- function(lock_max_age_secs = DEFAULT_LOCK_MAX_AGE_SECS) {
   raw_lock_max_age_secs <- lock_max_age_secs
   lock_max_age_secs <- if (is.numeric(lock_max_age_secs)) {
-    as.numeric(lock_max_age_secs)[1]
+    lock_max_age_secs[1]
   } else {
     tryCatch(
       as.numeric(lock_max_age_secs),
