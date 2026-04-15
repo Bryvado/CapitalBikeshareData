@@ -190,13 +190,6 @@ read_old_schema <- function(csv_path) {
         duration_secs
       )
     ) |>
-    dplyr::mutate(
-      duration_secs = dplyr::if_else(
-        duration_secs < 0,
-        NA_real_,
-        duration_secs
-      )
-    ) |>
     dplyr::select(dplyr::any_of(CANONICAL_COLS))
 }
 
@@ -243,13 +236,6 @@ read_new_schema <- function(csv_path) {
       user_type         = normalise_user_type(user_type),
       source_file       = basename(csv_path),
       era               = "new"
-    ) |>
-    dplyr::mutate(
-      duration_secs = dplyr::if_else(
-        duration_secs < 0,
-        NA_real_,
-        duration_secs
-      )
     ) |>
     dplyr::select(dplyr::any_of(CANONICAL_COLS))
 }
@@ -308,10 +294,6 @@ validate_trips <- function(df) {
     msgs <- c(msgs, paste("Missing columns:",
                           paste(setdiff(CANONICAL_COLS, names(df)),
                                 collapse = ", ")))
-
-  neg_dur <- sum(df$duration_secs < 0, na.rm = TRUE)
-  if (neg_dur > 0)
-    msgs <- c(msgs, sprintf("%d records with negative duration", neg_dur))
 
   na_start <- sum(is.na(df$started_at))
   if (na_start > 0)
