@@ -139,7 +139,7 @@ run_pipeline <- function(year           = NULL,
   extracted_files <- download_and_unzip(url, dest_raw)
   csv_files <- extracted_files[grepl("\\.csv$", extracted_files,
                                      ignore.case = TRUE)]
-  macos_metadata <- grepl("(^|[\\\\/])\\._", csv_files)
+  macos_metadata <- startsWith(basename(csv_files), "._")
   skipped_metadata <- sum(macos_metadata)
   csv_files <- csv_files[!macos_metadata]
   if (skipped_metadata > 0L) {
