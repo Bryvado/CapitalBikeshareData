@@ -125,17 +125,23 @@ run_pipeline <- function(year           = NULL,
   }
   downloaded_at <- Sys.time()
 
+  dest_raw <- raw_dir(label, root)
+  zip_file <- file.path(dest_raw, fname)
+
   # ------------------------------------------------------------------
-  # 3. Poll until available
+  # 3. Poll until available (unless already downloaded locally)
   # ------------------------------------------------------------------
-  poll_until_available(url,
-                       interval_secs = poll_interval,
-                       timeout_secs  = poll_timeout)
+  if (fs::file_exists(zip_file)) {
+    logger::log_info("ZIP already downloaded locally: {zip_file} — skipping availability poll")
+  } else {
+    poll_until_available(url,
+                         interval_secs = poll_interval,
+                         timeout_secs  = poll_timeout)
+  }
 
   # ------------------------------------------------------------------
   # 4. Download and unzip
   # ------------------------------------------------------------------
-  dest_raw <- raw_dir(label, root)
   extracted_files <- download_and_unzip(url, dest_raw)
   csv_files <- extracted_files[grepl("\\.csv$", extracted_files,
                                      ignore.case = TRUE)]
