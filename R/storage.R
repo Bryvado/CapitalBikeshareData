@@ -256,11 +256,34 @@ s3_key_lock <- function() s3_key("locks", "pipeline.lock")
 #'
 #' @return TRUE on success; FALSE when the lock is already held.
 #' @export
-acquire_run_lock <- function() {
+acquire_run_lock <- function(lock_max_age_secs = 2L * 60L * 60L) {
+  lock_max_age_secs <- suppressWarnings(as.numeric(lock_max_age_secs)[1])
+  if (!is.finite(lock_max_age_secs) || lock_max_age_secs <= 0) {
+    lock_max_age_secs <- 2L * 60L * 60L
+  }
+
   key <- s3_key_lock()
   if (s3_object_exists(key)) {
-    logger::log_warn("Run lock already held at s3://{s3_bucket()}/{key}")
-    return(FALSE)
+    lock_age_secs <- tryCatch({
+      head <- s3_client()$head_object(Bucket = s3_bucket(), Key = key)
+      as.numeric(difftime(Sys.time(), head$LastModified, units = "secs"))
+    }, error = function(e) NA_real_)
+
+    if (!is.na(lock_age_secs) && lock_age_secs > lock_max_age_secs) {
+      logger::log_warn(
+        "Stale run lock detected (age: {round(lock_age_secs)}s), removing: s3://{s3_bucket()}/{key}"
+      )
+      tryCatch(
+        s3_client()$delete_object(Bucket = s3_bucket(), Key = key),
+        error = function(e)
+          logger::log_warn("Failed to remove stale run lock: {conditionMessage(e)}")
+      )
+    }
+
+    if (s3_object_exists(key)) {
+      logger::log_warn("Run lock already held at s3://{s3_bucket()}/{key}")
+      return(FALSE)
+    }
   }
   info <- jsonlite::toJSON(list(
     locked_at = format(Sys.time(), "%Y-%m-%dT%H:%M:%SZ"),
