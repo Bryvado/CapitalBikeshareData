@@ -70,7 +70,10 @@ run_pipeline <- function(year           = NULL,
   # Acquire only at top-level to avoid re-entrant lock conflicts.
   # ------------------------------------------------------------------
   if (use_s3() && !isTRUE(.lock_held)) {
-    lock_max_age_raw <- Sys.getenv("CBS_LOCK_MAX_AGE_SECS", unset = "7200")
+    lock_max_age_raw <- Sys.getenv(
+      "CBS_LOCK_MAX_AGE_SECS",
+      unset = as.character(DEFAULT_LOCK_MAX_AGE_SECS)
+    )
     lock_max_age_secs <- tryCatch(
       as.numeric(lock_max_age_raw),
       warning = function(w) NA_real_,
@@ -78,9 +81,9 @@ run_pipeline <- function(year           = NULL,
     )
     if (!is.finite(lock_max_age_secs) || lock_max_age_secs <= 0) {
       logger::log_warn(
-        "Invalid CBS_LOCK_MAX_AGE_SECS value '{lock_max_age_raw}'; defaulting to 7200 seconds."
+        "Invalid CBS_LOCK_MAX_AGE_SECS value '{lock_max_age_raw}'; defaulting to {DEFAULT_LOCK_MAX_AGE_SECS} seconds."
       )
-      lock_max_age_secs <- 7200
+      lock_max_age_secs <- DEFAULT_LOCK_MAX_AGE_SECS
     }
     if (!acquire_run_lock(lock_max_age_secs = lock_max_age_secs)) {
       stop("Another pipeline run is currently in progress — exiting.")
