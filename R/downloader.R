@@ -26,6 +26,7 @@ CBS_BASE_URL <- "https://s3.amazonaws.com/capitalbikeshare-data/"
 #' Return the S3 file-name for a given year and (optionally) month.
 #'
 #' For 2010-2017 annual ZIPs are used; for 2018+ monthly ZIPs are used.
+#' Years before 2010 are not supported.
 #'
 #' @param year  Integer year.
 #' @param month Integer month (1-12). Ignored for 2010-2017.
@@ -33,7 +34,10 @@ CBS_BASE_URL <- "https://s3.amazonaws.com/capitalbikeshare-data/"
 #' @export
 cbs_filename <- function(year, month = NULL) {
   year <- as.integer(year)
-  if (year <= 2017L) {
+  if (year < 2010L) {
+    stop("year must be >= 2010")
+  }
+  if (year >= 2010L && year <= 2017L) {
     return(sprintf("%04d-capitalbikeshare-tripdata.zip", year))
   }
   if (is.null(month)) stop("month required for year >= 2018")
@@ -69,7 +73,10 @@ next_expected_file <- function(current_year = NULL, current_month = NULL) {
 
   next_year  <- current_year
   next_month <- current_month
-  if (current_year <= 2017L) {
+  if (current_year < 2010L) {
+    stop("current_year must be >= 2010")
+  }
+  if (current_year >= 2010L && current_year <= 2017L) {
     next_year  <- current_year + 1L
     next_month <- 1L
   } else {
