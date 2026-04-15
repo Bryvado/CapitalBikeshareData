@@ -189,6 +189,24 @@ run_pipeline <- function(year           = NULL,
   logger::log_info("Parsed {nrow(trips)} rows, era={era}")
 
   # ------------------------------------------------------------------
+  # 5b. Drop negative-duration records
+  # ------------------------------------------------------------------
+  neg_n    <- sum(!is.na(trips$duration_secs) & trips$duration_secs < 0)
+  neg_rate <- neg_n / nrow(trips)
+  if (neg_rate > 0.01) {
+    stop(sprintf(
+      "Negative-duration rate %.3f%% exceeds 1%% threshold — investigate source data/time parsing",
+      100 * neg_rate
+    ))
+  }
+  if (neg_n > 0) {
+    logger::log_warn(
+      "Dropping {neg_n} record(s) with negative duration ({round(100 * neg_rate, 3)}%)"
+    )
+    trips <- trips |> dplyr::filter(is.na(duration_secs) | duration_secs >= 0)
+  }
+
+  # ------------------------------------------------------------------
   # 6. Validate
   # ------------------------------------------------------------------
   validation <- validate_trips(trips)
