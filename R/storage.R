@@ -54,6 +54,8 @@ s3_key <- function(...) {
   paste(parts, collapse = "/")
 }
 
+normalize_s3_key <- function(key) as.character(key)[1]
+
 # ---------------------------------------------------------------------------
 # S3 client (lazily created, cached for the R session)
 # ---------------------------------------------------------------------------
@@ -85,6 +87,7 @@ s3_client <- function() {
 #' @return     TRUE / FALSE.
 #' @export
 s3_object_exists <- function(key) {
+  key <- normalize_s3_key(key)
   tryCatch({
     s3_client()$head_object(Bucket = s3_bucket(), Key = key)
     TRUE
@@ -97,12 +100,14 @@ s3_object_exists <- function(key) {
 #' @param key         Destination S3 object key.
 #' @export
 s3_upload_file <- function(local_path, key) {
+  key <- normalize_s3_key(key)
   con <- file(local_path, open = "rb")
   on.exit(close(con), add = TRUE)
+  payload <- readBin(con, what = "raw", n = file.size(local_path))
   s3_client()$put_object(
     Bucket = s3_bucket(),
     Key    = key,
-    Body   = con
+    Body   = payload
   )
   logger::log_debug("S3 upload: {local_path} → s3://{s3_bucket()}/{key}")
   invisible(key)
@@ -114,6 +119,7 @@ s3_upload_file <- function(local_path, key) {
 #' @param local_path  Destination local path (parent directories are created).
 #' @export
 s3_download_file <- function(key, local_path) {
+  key <- normalize_s3_key(key)
   fs::dir_create(dirname(local_path))
   resp <- s3_client()$get_object(Bucket = s3_bucket(), Key = key)
   writeBin(resp$Body, local_path)
@@ -127,6 +133,7 @@ s3_download_file <- function(key, local_path) {
 #' @return     Character scalar.
 #' @export
 s3_read_text <- function(key) {
+  key <- normalize_s3_key(key)
   resp <- s3_client()$get_object(Bucket = s3_bucket(), Key = key)
   rawToChar(resp$Body)
 }
@@ -137,6 +144,8 @@ s3_read_text <- function(key) {
 #' @param key  Destination S3 object key.
 #' @export
 s3_write_text <- function(text, key) {
+  key <- normalize_s3_key(key)
+  text <- as.character(text)[1]
   s3_client()$put_object(
     Bucket = s3_bucket(),
     Key    = key,
