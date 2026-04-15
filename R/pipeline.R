@@ -139,10 +139,16 @@ run_pipeline <- function(year           = NULL,
   extracted_files <- download_and_unzip(url, dest_raw)
   csv_files <- extracted_files[grepl("\\.csv$", extracted_files,
                                      ignore.case = TRUE)]
+  macos_metadata <- grepl("(^|[\\\\/])\\._", csv_files)
+  skipped_metadata <- sum(macos_metadata)
+  csv_files <- csv_files[!macos_metadata]
+  if (skipped_metadata > 0L) {
+    logger::log_info("Ignoring {skipped_metadata} macOS metadata CSV file(s) (._*)")
+  }
   if (length(csv_files) == 0L)
-    stop(sprintf("No CSV files found in ZIP for %s", fname))
+    stop(sprintf("No valid CSV files found in ZIP for %s", fname))
 
-  logger::log_info("Found {length(csv_files)} CSV file(s)")
+  logger::log_info("Found {length(csv_files)} valid CSV file(s)")
 
   # ------------------------------------------------------------------
   # 5. Read and standardise all CSVs
