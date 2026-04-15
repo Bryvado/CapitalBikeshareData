@@ -249,9 +249,10 @@ download_and_unzip <- function(url, dest_dir, n_retries = 3L, overwrite = TRUE) 
 #'
 #' @param zip_file  Path to an existing local ZIP file.
 #' @param dest_dir  Local directory for extracted files.
+#' @param overwrite Logical; whether extracted files may overwrite existing files.
 #' @return Character vector of extracted file paths.
 #' @export
-unzip_existing_zip <- function(zip_file, dest_dir) {
+unzip_existing_zip <- function(zip_file, dest_dir, overwrite = TRUE) {
   if (!fs::file_exists(zip_file)) {
     stop(sprintf("ZIP file does not exist: %s", zip_file))
   }
@@ -265,7 +266,7 @@ unzip_existing_zip <- function(zip_file, dest_dir) {
     logger::log_info("CSV files already extracted in {dest_dir} — skipping extraction")
     return(existing_csv)
   }
-  extracted <- unzip(zip_file, exdir = dest_dir, overwrite = TRUE)
+  extracted <- unzip(zip_file, exdir = dest_dir, overwrite = overwrite)
   logger::log_info("Extracted {length(extracted)} file(s) from existing ZIP to {dest_dir}")
   extracted
 }
