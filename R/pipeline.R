@@ -145,9 +145,9 @@ run_pipeline <- function(year           = NULL,
   # 4. Download and unzip
   # ------------------------------------------------------------------
   extracted_files <- if (already_downloaded) {
-    unzip_existing_zip(zip_file, dest_raw)
+    unzip_existing_zip(zip_file, dest_raw, overwrite = TRUE)
   } else {
-    download_and_unzip(url, dest_raw)
+    download_and_unzip(url, dest_raw, overwrite = TRUE)
   }
   csv_files <- extracted_files[grepl("\\.csv$", extracted_files,
                                      ignore.case = TRUE)]
