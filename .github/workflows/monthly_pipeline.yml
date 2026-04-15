@@ -29,6 +29,11 @@ on:
         description: 'Month 1–12 to process (leave blank for auto-detect)'
         required: false
         type: string
+      all_available:
+        description: 'Process all currently available data files'
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -91,10 +96,15 @@ jobs:
         env:
           PIPELINE_YEAR:  ${{ inputs.year }}
           PIPELINE_MONTH: ${{ inputs.month }}
+          PIPELINE_ALL_AVAILABLE: ${{ inputs.all_available }}
         run: |
           source("R/pipeline.R")
           year  <- if (nzchar(Sys.getenv("PIPELINE_YEAR")))
                      as.integer(Sys.getenv("PIPELINE_YEAR")) else NULL
           month <- if (nzchar(Sys.getenv("PIPELINE_MONTH")))
                      as.integer(Sys.getenv("PIPELINE_MONTH")) else NULL
-          run_pipeline(year = year, month = month)
+          all_available <- identical(
+            tolower(Sys.getenv("PIPELINE_ALL_AVAILABLE", unset = "false")),
+            "true"
+          )
+          run_pipeline(year = year, month = month, all_available = all_available)

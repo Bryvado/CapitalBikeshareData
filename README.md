@@ -105,6 +105,13 @@ source("R/pipeline.R")
 run_pipeline(year = 2012, month = 1)
 ```
 
+### Download and process all available data
+
+```r
+source("R/pipeline.R")
+run_pipeline(all_available = TRUE)
+```
+
 ---
 
 ## Running without a local machine — GitHub Actions + S3
@@ -281,6 +288,7 @@ All tunable parameters are arguments to `run_pipeline()`:
 | Parameter | Default | Description |
 |---|---|---|
 | `year` / `month` | `NULL` (auto) | Target period |
+| `all_available` | `FALSE` | Process every currently available file (cannot be combined with `year` / `month`) |
 | `root` | `"."` | Project root |
 | `poll_interval` | `900` | Seconds between S3 polls |
 | `poll_timeout` | 30 days | Give up after this many seconds |
