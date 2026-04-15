@@ -44,7 +44,8 @@ source("R/parquet.R")
 #' @param poll_interval    Seconds between S3 existence polls (default 900).
 #' @param poll_timeout     Total seconds to wait for the file (default 30 days).
 #' @param fuzzy_threshold  Jaro-Winkler threshold for station fuzzy-matching.
-#' @param .lock_held       Internal logical; when TRUE, skip lock acquisition.
+#' @param .lock_held       Internal use only; do not set manually. When TRUE,
+#'                         lock acquisition is skipped for nested calls.
 #' @return Invisibly, the path to the per-month parquet that was written.
 #'         Returns NULL if the month was already processed (skipped).
 #'         When `all_available = TRUE`, returns a character vector of outputs.
@@ -60,6 +61,9 @@ run_pipeline <- function(year           = NULL,
 
   init_logger(log_dir = file.path(root, "logs"))
   logger::log_info("=== Capital Bikeshare Pipeline START ===")
+  if (!is.logical(.lock_held) || length(.lock_held) != 1L || is.na(.lock_held)) {
+    stop("`.lock_held` must be a single non-missing logical value.")
+  }
 
   # ------------------------------------------------------------------
   # Run-level locking (S3 mode only) — prevents concurrent executions.
