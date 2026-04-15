@@ -276,5 +276,5 @@ unzip_existing_zip <- function(zip_file, dest_dir, overwrite = TRUE) {
   }
   extracted <- unzip(zip_file, exdir = dest_dir, overwrite = overwrite)
   logger::log_info("Extracted {length(extracted)} file(s) from existing ZIP to {dest_dir}")
-  extracted
+  expected_file_paths[fs::file_exists(expected_file_paths)]
 }
