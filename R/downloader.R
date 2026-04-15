@@ -5,9 +5,8 @@
 #   https://s3.amazonaws.com/capitalbikeshare-data/
 #
 # File-name patterns (by year):
-#   2014       → 2014-capitalbikeshare-tripdata.zip   (annual)
-#   2015–2017  → YYYYQQ-capitalbikeshare-tripdata.zip (quarterly: Q1–Q4)
-#   2018+      → YYYYMM-capitalbikeshare-tripdata.zip (monthly)
+#   2010–2017  → YYYY-capitalbikeshare-tripdata.zip    (annual)
+#   2018+      → YYYYMM-capitalbikeshare-tripdata.zip  (monthly)
 # ---------------------------------------------------------------------------
 
 suppressPackageStartupMessages({
@@ -26,27 +25,24 @@ CBS_BASE_URL <- "https://s3.amazonaws.com/capitalbikeshare-data/"
 
 #' Return the S3 file-name for a given year and (optionally) month.
 #'
-#' For 2014 the annual ZIP is used; for 2015-2017 quarterly ZIPs are used;
-#' for 2018+ monthly ZIPs are used.
+#' For 2010-2017 annual ZIPs are used; for 2018+ monthly ZIPs are used.
+#' Years before 2010 are not supported.
 #'
 #' @param year  Integer year.
-#' @param month Integer month (1-12). Ignored for 2014.
+#' @param month Integer month (1-12). Ignored for 2010-2017.
 #' @return A character string with the ZIP file name (no base URL).
 #' @export
 cbs_filename <- function(year, month = NULL) {
   year <- as.integer(year)
-  if (year == 2014L) {
-    return("2014-capitalbikeshare-tripdata.zip")
+  if (year < 2010L) {
+    stop("year must be >= 2010")
   }
-  if (is.null(month)) stop("month required for year != 2014")
+  if (year >= 2010L && year <= 2017L) {
+    return(sprintf("%04d-capitalbikeshare-tripdata.zip", year))
+  }
+  if (is.null(month)) stop("month required for year >= 2018")
   month <- as.integer(month)
-  if (year >= 2018L) {
-    label <- sprintf("%04d%02d", year, month)
-  } else {
-    # 2015-2017: quarterly files — map month → quarter label
-    q <- ceiling(month / 3L)
-    label <- sprintf("%04dQ%d", year, q)
-  }
+  label <- sprintf("%04d%02d", year, month)
   paste0(label, "-capitalbikeshare-tripdata.zip")
 }
 
@@ -59,9 +55,8 @@ cbs_url <- function(filename) paste0(CBS_BASE_URL, filename)
 #' Predict the next expected ZIP label given the latest known period.
 #'
 #' For 2018+ monthly files the next label is the calendar month after
-#' `current_year / current_month`.  For quarterly 2015-2017 files the
-#' next quarter is returned.  If `current_year` is 2014 the first
-#' quarterly file of 2015 (Q1) is returned.
+#' `current_year / current_month`. For 2010-2017 annual files, the next
+#' year is returned with month set to 1.
 #'
 #' @param current_year  Most-recently processed year (integer or NULL to use today).
 #' @param current_month Most-recently processed month (integer or NULL).
@@ -76,12 +71,22 @@ next_expected_file <- function(current_year = NULL, current_month = NULL) {
   current_year  <- as.integer(current_year)
   current_month <- as.integer(current_month %||% 1L)
 
-  # Advance by one month
-  next_month <- current_month + 1L
   next_year  <- current_year
-  if (next_month > 12L) {
+  next_month <- current_month
+  if (current_year < 2010L) {
+    stop("current_year must be >= 2010")
+  }
+  if (current_year >= 2010L && current_year <= 2017L) {
+    next_year  <- current_year + 1L
     next_month <- 1L
-    next_year  <- next_year + 1L
+  } else {
+    # Advance by one month
+    next_month <- current_month + 1L
+    next_year  <- current_year
+    if (next_month > 12L) {
+      next_month <- 1L
+      next_year  <- next_year + 1L
+    }
   }
 
   fname <- cbs_filename(next_year, next_month)
