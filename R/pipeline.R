@@ -44,6 +44,7 @@ source("R/parquet.R")
 #' @param poll_interval    Seconds between S3 existence polls (default 900).
 #' @param poll_timeout     Total seconds to wait for the file (default 30 days).
 #' @param fuzzy_threshold  Jaro-Winkler threshold for station fuzzy-matching.
+#' @param .lock_held       Internal logical; when TRUE, skip lock acquisition.
 #' @return Invisibly, the path to the per-month parquet that was written.
 #'         Returns NULL if the month was already processed (skipped).
 #'         When `all_available = TRUE`, returns a character vector of outputs.
@@ -54,10 +55,22 @@ run_pipeline <- function(year           = NULL,
                          root           = ".",
                          poll_interval  = 900L,
                          poll_timeout   = 30L * 24L * 3600L,
-                         fuzzy_threshold = 0.92) {
+                         fuzzy_threshold = 0.92,
+                         .lock_held      = FALSE) {
 
   init_logger(log_dir = file.path(root, "logs"))
   logger::log_info("=== Capital Bikeshare Pipeline START ===")
+
+  # ------------------------------------------------------------------
+  # Run-level locking (S3 mode only) — prevents concurrent executions.
+  # Acquire only at top-level to avoid re-entrant lock conflicts.
+  # ------------------------------------------------------------------
+  if (use_s3() && !isTRUE(.lock_held)) {
+    if (!acquire_run_lock()) {
+      stop("Another pipeline run is currently in progress — exiting.")
+    }
+    on.exit(release_run_lock(), add = TRUE)
+  }
 
   if (isTRUE(all_available)) {
     if (!is.null(year) || !is.null(month)) {
@@ -79,22 +92,12 @@ run_pipeline <- function(year           = NULL,
         root            = root,
         poll_interval   = poll_interval,
         poll_timeout    = poll_timeout,
-        fuzzy_threshold = fuzzy_threshold
+        fuzzy_threshold = fuzzy_threshold,
+        .lock_held      = TRUE
       )
     }), use.names = FALSE)
 
     return(invisible(outputs))
-  }
-
-  # ------------------------------------------------------------------
-  # Run-level locking (S3 mode only) — prevents concurrent executions.
-  # The lock is released automatically via on.exit even on error.
-  # ------------------------------------------------------------------
-  if (use_s3()) {
-    if (!acquire_run_lock()) {
-      stop("Another pipeline run is currently in progress — exiting.")
-    }
-    on.exit(release_run_lock(), add = TRUE)
   }
 
   # ------------------------------------------------------------------
