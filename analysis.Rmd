@@ -32,8 +32,7 @@ source("R/analysis.R")
 
 The heatmap below shows every year-month period that has been successfully
 downloaded and processed.  Colour intensity reflects trip volume; grey cells
-indicate periods where no file was processed.  Annual files (2010–2017) appear
-in the **January** column.
+indicate periods where no file was processed.
 
 ```{r availability-chart, fig.height=7}
 avail <- summarize_data_availability()
@@ -77,18 +76,29 @@ ext <- tryCatch(
   }
 )
 
-tracts_sf <- download_census_tracts(extent = ext, year = 2020L)
-
-tracts_counts <- tryCatch(
-  aggregate_trips_to_tracts(tracts_sf = tracts_sf),
+tracts_sf <- tryCatch(
+  download_census_tracts(extent = ext, year = 2020L),
   error = function(e) {
-    message("Trip aggregation failed: ", conditionMessage(e))
-    tracts_sf$n_trips <- NA_integer_
-    tracts_sf
+    message("Census tract download failed: ", conditionMessage(e))
+    NULL
   }
 )
 
-print(build_tract_map(tracts_counts))
+if (is.null(tracts_sf)) {
+  cat("> **Census tract data unavailable** — tigris download failed.",
+      "Check your internet connection and retry.")
+} else {
+  tracts_counts <- tryCatch(
+    aggregate_trips_to_tracts(tracts_sf = tracts_sf, sample = 1000000L),
+    error = function(e) {
+      message("Trip aggregation failed: ", conditionMessage(e))
+      tracts_sf$n_trips <- NA_integer_
+      tracts_sf
+    }
+  )
+
+  print(build_tract_map(tracts_counts))
+}
 ```
 
 ---

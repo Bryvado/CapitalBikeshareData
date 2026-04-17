@@ -42,8 +42,11 @@ MONTH_LABELS <- c("Jan", "Feb", "Mar", "Apr", "May", "Jun",
 #' Summarise which year-months of data are available and how many trips each
 #' period contains.
 #'
-#' Reads the master parquet files (both eras) and the manifest.  Returns a
-#' tidy tibble with one row per year-month period.
+#' Reads the manifest and, for annual files (2010-2017, 4-character period),
+#' also reads the master parquet to compute actual per-month trip counts so
+#' that the full year of data is reflected correctly rather than all trips
+#' being attributed to January.  Monthly files (2018+, 6-character period)
+#' are taken directly from the manifest row count.
 #'
 #' @param root  Project root directory.
 #' @return A tibble with columns: year, month, period (label), era, n_trips,
@@ -68,20 +71,89 @@ summarize_data_availability <- function(root = ".") {
       # Derive year / month from filename (YYYY- or YYYYMM- prefix)
       period = sub("-capitalbikeshare-tripdata\\.zip$", "", basename(filename)),
       year   = dplyr::case_when(
-        nchar(period) == 4L ~ as.integer(period),          # "YYYY"
+        nchar(period) == 4L ~ as.integer(period),               # "YYYY"
         nchar(period) == 6L ~ as.integer(substr(period, 1, 4)), # "YYYYMM"
         TRUE                ~ NA_integer_
       ),
       month  = dplyr::case_when(
-        nchar(period) == 4L ~ 1L,
+        nchar(period) == 4L ~ NA_integer_,   # will be expanded below
         nchar(period) == 6L ~ as.integer(substr(period, 5, 6)),
         TRUE                ~ NA_integer_
       ),
       n_trips      = as.integer(rows),
       processed_at = as.POSIXct(processed_at)
     ) |>
-    dplyr::select(year, month, period, era, n_trips, processed_at, status) |>
-    dplyr::arrange(year, month)
+    dplyr::select(year, month, period, era, n_trips, processed_at, status)
+
+  # ------------------------------------------------------------------
+  # Expand annual-file rows (4-char period) into per-month rows by
+  # reading the master parquet and counting trips by calendar month.
+  # This ensures annual data (2010-2017) appears in the correct monthly
+  # cells rather than being collapsed into a single January entry.
+  # ------------------------------------------------------------------
+  annual_mask  <- is.na(avail$month)
+  monthly_rows <- avail[!annual_mask, ]
+
+  if (any(annual_mask)) {
+    annual_rows <- avail[annual_mask, ]
+
+    expanded_list <- lapply(unique(annual_rows$era), function(era_val) {
+      era_annual <- dplyr::filter(annual_rows, era == era_val)
+      years_needed <- unique(era_annual$year)
+
+      master <- tryCatch(
+        read_master(era_val, root),
+        error = function(e) {
+          logger::log_warn(
+            "Could not read master [{era_val}] for monthly expansion: ",
+            conditionMessage(e)
+          )
+          NULL
+        }
+      )
+
+      if (is.null(master) || nrow(master) == 0L) {
+        # Fallback: keep the single row attributed to month 1 (January)
+        logger::log_warn(
+          "Master [{era_val}] unavailable — annual files will be shown in January"
+        )
+        return(dplyr::mutate(era_annual, month = 1L))
+      }
+
+      # Count trips per year-month for every annual year in this era
+      monthly_counts <- master |>
+        dplyr::filter(
+          lubridate::year(started_at) %in% years_needed,
+          !is.na(started_at)
+        ) |>
+        dplyr::mutate(
+          year  = lubridate::year(started_at),
+          month = lubridate::month(started_at)
+        ) |>
+        dplyr::count(year, month, name = "n_trips") |>
+        dplyr::mutate(
+          year    = as.integer(year),
+          month   = as.integer(month),
+          period  = sprintf("%04d%02d", year, month),
+          era     = era_val,
+          n_trips = as.integer(n_trips)
+        )
+
+      # Attach processed_at / status from the annual manifest rows
+      monthly_counts |>
+        dplyr::left_join(
+          dplyr::select(era_annual, year, processed_at, status),
+          by = "year"
+        ) |>
+        dplyr::select(year, month, period, era, n_trips, processed_at, status)
+    })
+
+    annual_expanded <- dplyr::bind_rows(expanded_list)
+    avail <- dplyr::bind_rows(annual_expanded, monthly_rows) |>
+      dplyr::arrange(year, month)
+  } else {
+    avail <- dplyr::arrange(avail, year, month)
+  }
 
   logger::log_info(
     "Data availability: {nrow(avail)} period(s) from {min(avail$year)} to {max(avail$year)}"
@@ -148,7 +220,7 @@ trip_extent <- function(root = ".", sample = 500000L) {
 #' @return An `sf` object of census tracts.
 #' @export
 download_census_tracts <- function(extent = NULL, year = 2020L, cache = TRUE) {
-  tigris::options(use_tigris_cache = cache)
+  options(tigris_use_cache = cache)
 
   if (is.null(extent)) {
     extent <- list(xmin = -77.6, xmax = -76.8, ymin = 38.7, ymax = 39.2)
@@ -220,6 +292,16 @@ aggregate_trips_to_tracts <- function(root = ".", tracts_sf,
 
   trips_df <- dplyr::bind_rows(coord_rows)
 
+  if (nrow(trips_df) == 0L) {
+    stop(
+      if (!is.null(year_filter))
+        paste0("No trip coordinate data found for year(s): ",
+               paste(sort(year_filter), collapse = ", "))
+      else
+        "No trip coordinate data found — coordinates may not have been enriched yet."
+    )
+  }
+
   trips_sf <- sf::st_as_sf(
     trips_df,
     coords = c("start_lng", "start_lat"),
@@ -276,10 +358,7 @@ build_availability_chart <- function(avail) {
     ) +
     ggplot2::labs(
       title    = "Capital Bikeshare — Data Availability by Year & Month",
-      subtitle = paste0(
-        "Shaded cells = successfully processed files; colour = trip count.\n",
-        "Annual (2010-2017) files shown in January column."
-      ),
+      subtitle = "Shaded cells = successfully processed periods; colour = trip count.",
       x = "Month",
       y = "Year"
     ) +
@@ -391,33 +470,49 @@ run_analysis <- function(root         = ".",
     "lat [{round(ext$ymin,4)}, {round(ext$ymax,4)}]"
   )
 
-  tracts_sf <- download_census_tracts(extent = ext, year = tract_year)
-
-  # --- Step 4: aggregate trips to tracts ---
-  tracts_with_trips <- tryCatch(
-    aggregate_trips_to_tracts(root       = root,
-                              tracts_sf  = tracts_sf,
-                              year_filter = year_filter,
-                              sample     = sample),
+  tracts_sf <- tryCatch(
+    download_census_tracts(extent = ext, year = tract_year),
     error = function(e) {
-      logger::log_warn("Trip aggregation failed: {conditionMessage(e)}. ",
-                       "Returning tracts without trip counts.")
-      dplyr::mutate(tracts_sf, n_trips = NA_integer_)
+      logger::log_warn("Census tract download failed: {conditionMessage(e)}. ",
+                       "Tract map will be skipped.")
+      NULL
     }
   )
 
-  # --- Step 5: map ---
-  map_title <- if (!is.null(year_filter)) {
-    paste0("Capital Bikeshare Trip Starts by Census Tract (",
-           paste(sort(year_filter), collapse = ", "), ")")
+  # --- Step 4: aggregate trips to tracts ---
+  if (is.null(tracts_sf)) {
+    tracts_with_trips <- NULL
   } else {
-    "Capital Bikeshare Trip Starts by Census Tract (All Years)"
+    tracts_with_trips <- tryCatch(
+      aggregate_trips_to_tracts(root       = root,
+                                tracts_sf  = tracts_sf,
+                                year_filter = year_filter,
+                                sample     = sample),
+      error = function(e) {
+        logger::log_warn("Trip aggregation failed: {conditionMessage(e)}. ",
+                         "Returning tracts without trip counts.")
+        dplyr::mutate(tracts_sf, n_trips = NA_integer_)
+      }
+    )
   }
 
-  tract_map  <- build_tract_map(tracts_with_trips, title = map_title)
-  map_path   <- file.path(plots_dir, "tract_trip_density_map.png")
-  ggplot2::ggsave(map_path, tract_map, width = 10, height = 10, dpi = 150)
-  logger::log_info("Saved tract map to {map_path}")
+  # --- Step 5: map ---
+  if (is.null(tracts_with_trips)) {
+    tract_map <- NULL
+    logger::log_warn("Tract map skipped — census tract data unavailable.")
+  } else {
+    map_title <- if (!is.null(year_filter)) {
+      paste0("Capital Bikeshare Trip Starts by Census Tract (",
+             paste(sort(year_filter), collapse = ", "), ")")
+    } else {
+      "Capital Bikeshare Trip Starts by Census Tract (All Years)"
+    }
+
+    tract_map  <- build_tract_map(tracts_with_trips, title = map_title)
+    map_path   <- file.path(plots_dir, "tract_trip_density_map.png")
+    ggplot2::ggsave(map_path, tract_map, width = 10, height = 10, dpi = 150)
+    logger::log_info("Saved tract map to {map_path}")
+  }
 
   logger::log_info("=== Capital Bikeshare Analysis COMPLETE ===")
 
