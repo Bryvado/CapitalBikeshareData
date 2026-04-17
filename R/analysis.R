@@ -29,6 +29,13 @@ source("R/storage.R")
 source("R/parquet.R")
 
 # ---------------------------------------------------------------------------
+# Package-level constants
+# ---------------------------------------------------------------------------
+
+MONTH_LABELS <- c("Jan", "Feb", "Mar", "Apr", "May", "Jun",
+                  "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
+
+# ---------------------------------------------------------------------------
 # 1. Data availability summary
 # ---------------------------------------------------------------------------
 
@@ -255,8 +262,7 @@ build_availability_chart <- function(avail) {
     stop("No availability data to plot — run the pipeline first.")
   }
 
-  month_labels <- c("Jan", "Feb", "Mar", "Apr", "May", "Jun",
-                    "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
+  month_labels <- MONTH_LABELS
 
   plot_df <- avail |>
     dplyr::mutate(
@@ -403,8 +409,7 @@ run_analysis <- function(root         = ".",
     error = function(e) {
       logger::log_warn("Trip aggregation failed: {conditionMessage(e)}. ",
                        "Returning tracts without trip counts.")
-      tracts_sf$n_trips <- NA_integer_
-      tracts_sf
+      dplyr::mutate(tracts_sf, n_trips = rep(NA_integer_, dplyr::n()))
     }
   )
 

@@ -182,7 +182,7 @@ map   <- build_tract_map(tracts_with_counts)
 | `tract_year` | `2020` | Decennial census year for tract boundaries |
 | `year_filter` | `NULL` | Integer vector of years to map; NULL = all years |
 | `plots_dir` | `data/plots/` | Output directory for saved PNGs |
-| `sample` | `1000000` | Max rows per era when aggregating (reduce if memory-constrained) |
+| `sample` | `1000000` | Max rows per era in `run_analysis()` (passed to aggregation & extent steps; `trip_extent()` uses `500000` by default when called directly) |
 
 ---
 
