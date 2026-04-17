@@ -17,7 +17,8 @@ The pipeline supports two storage backends:
 CapitalBikeshareData/
 ├── .github/
 │   └── workflows/
-│       └── monthly_pipeline.yml  # Scheduled GitHub Actions workflow
+│       ├── monthly_pipeline.yml  # Scheduled pipeline workflow
+│       └── pages.yml             # GitHub Pages build & deploy workflow
 ├── R/
 │   ├── utils.R          # Logging, retry, path helpers
 │   ├── storage.R        # S3 abstraction layer (use_s3(), key helpers, locking)
@@ -36,6 +37,7 @@ CapitalBikeshareData/
 ├── logs/
 │   └── pipeline.log     # Unified log file (appended each run)
 ├── manifest.csv         # Processing manifest (idempotency record)
+├── analysis.Rmd         # R Markdown report rendered to GitHub Pages
 └── run_cbs_pipeline.R   # Auto-generated monthly driver script
 ```
 
@@ -135,7 +137,29 @@ After the pipeline has populated the master parquet files, the analysis module
 4. Spatially join trip starts to tracts and produce a **choropleth map** of
    trip density.
 
-Both plots are saved as PNGs in `data/plots/`.
+Both plots are saved as PNGs in `data/plots/` when running locally, and are
+embedded directly in the HTML report when rendered via GitHub Pages.
+
+### GitHub Pages — live dashboard
+
+The analysis report is published automatically to **GitHub Pages** after every
+successful pipeline run.  The page is rendered from `analysis.Rmd` by the
+`.github/workflows/pages.yml` workflow.
+
+#### One-time setup
+
+1. Go to **Settings → Pages** in your fork.
+2. Set **Source** to **"GitHub Actions"** (not a branch/folder).
+3. Ensure the same `CBS_S3_BUCKET`, `AWS_ROLE_TO_ASSUME`, `AWS_REGION` secrets
+   and variables are set (shared with the pipeline workflow).
+
+Once configured, the dashboard will be live at:
+
+```
+https://<your-github-username>.github.io/<repo-name>/
+```
+
+and will refresh automatically every time the monthly pipeline finishes.
 
 ### Run the full analysis
 

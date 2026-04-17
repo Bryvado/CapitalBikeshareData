@@ -108,11 +108,9 @@ trip_extent <- function(root = ".", sample = 500000L) {
   lngs <- numeric(0L)
 
   for (era in c("old", "new")) {
-    mp <- master_path(era, root)
-    if (!fs::file_exists(mp)) next
-    df <- arrow::read_parquet(mp,
-                              col_select = c("start_lat", "start_lng",
-                                             "end_lat",   "end_lng"))
+    df <- read_master(era, root)
+    if (is.null(df)) next
+    df <- dplyr::select(df, start_lat, start_lng, end_lat, end_lng)
     if (!is.null(sample) && nrow(df) > sample) {
       df <- df[sample(nrow(df), sample), ]
     }
@@ -201,13 +199,10 @@ aggregate_trips_to_tracts <- function(root = ".", tracts_sf,
   coord_rows <- list()
 
   for (era in c("old", "new")) {
-    mp <- master_path(era, root)
-    if (!fs::file_exists(mp)) next
-    df <- arrow::read_parquet(
-      mp,
-      col_select = c("started_at", "start_lat", "start_lng")
-    )
+    df <- read_master(era, root)
+    if (is.null(df)) next
     df <- df |>
+      dplyr::select(started_at, start_lat, start_lng) |>
       dplyr::filter(!is.na(start_lat), !is.na(start_lng)) |>
       dplyr::mutate(year = lubridate::year(started_at))
 
@@ -262,11 +257,9 @@ build_availability_chart <- function(avail) {
     stop("No availability data to plot — run the pipeline first.")
   }
 
-  month_labels <- MONTH_LABELS
-
   plot_df <- avail |>
     dplyr::mutate(
-      month_fac = factor(month, levels = 1:12, labels = month_labels),
+      month_fac = factor(month, levels = seq_along(MONTH_LABELS), labels = MONTH_LABELS),
       year_fac  = factor(year)
     )
 
@@ -409,7 +402,7 @@ run_analysis <- function(root         = ".",
     error = function(e) {
       logger::log_warn("Trip aggregation failed: {conditionMessage(e)}. ",
                        "Returning tracts without trip counts.")
-      dplyr::mutate(tracts_sf, n_trips = rep(NA_integer_, dplyr::n()))
+      dplyr::mutate(tracts_sf, n_trips = NA_integer_)
     }
   )
 

@@ -255,7 +255,7 @@ download_and_unzip <- function(url, dest_dir, n_retries = 3L, overwrite = TRUE) 
 unzip_existing_zip <- function(zip_file, dest_dir, overwrite = TRUE) {
   if (!fs::file_exists(zip_file)) {
     stop(sprintf(
-      "ZIP file does not exist: %s. Download it first or use download_and_unzip().",
+      "ZIP file does not exist: %s. Download it first with download_and_unzip().",
       zip_file
     ))
   }
