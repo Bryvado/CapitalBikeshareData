@@ -15,10 +15,12 @@ output:
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(
-  echo    = FALSE,
-  message = FALSE,
-  warning = FALSE
+  echo       = FALSE,
+  message    = FALSE,
+  warning    = FALSE,
+  cache.path = "cache/"
 )
+dir.create("cache", showWarnings = FALSE)
 source("R/analysis.R")
 ```
 
@@ -63,7 +65,7 @@ Virginia).  Tract boundaries are downloaded via the
 [`tigris`](https://github.com/walkerke/tigris) package using the data's
 own geographic extent.  Colour is log-scaled.
 
-```{r tract-map, fig.width=10, fig.height=10}
+```{r tract-map, fig.width=10, fig.height=10, cache=TRUE}
 ext <- tryCatch(
   trip_extent(),
   error = function(e) {
