@@ -1,0 +1,17 @@
+# Python dependencies for analysis_interactive.py
+# Install with: pip install -r requirements_interactive.txt
+
+# Core data
+pandas>=2.0
+pyarrow>=14.0
+
+# Spatial
+geopandas>=1.0
+pygris>=0.2.0
+shapely>=2.0
+
+# Visualisation
+plotly>=5.18
+
+# S3 access (only required when CBS_S3_BUCKET is set)
+boto3>=1.34
