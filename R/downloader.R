@@ -272,7 +272,9 @@ unzip_existing_zip <- function(zip_file, dest_dir, overwrite = TRUE) {
   if (length(expected_csv_paths) > 0L &&
       all(fs::file_exists(expected_csv_paths))) {
     logger::log_info("Expected CSV files already extracted in {dest_dir} — skipping extraction")
-    return(expected_file_paths[fs::file_exists(expected_file_paths)])
+    # Return only the verified CSV paths so callers receive consistent,
+    # existing-file paths regardless of whether non-CSV entries were extracted.
+    return(expected_csv_paths)
   }
   extracted <- unzip(zip_file, exdir = dest_dir, overwrite = overwrite)
   logger::log_info("Extracted {length(extracted)} file(s) from existing ZIP to {dest_dir}")
