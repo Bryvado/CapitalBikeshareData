@@ -93,6 +93,7 @@ jobs:
             libgdal-dev \
             libgeos-dev \
             libproj-dev \
+            libudunits2-dev \
             libssl-dev \
             pkg-config \
             pandoc
