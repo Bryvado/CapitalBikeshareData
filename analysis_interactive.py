@@ -286,7 +286,7 @@ def aggregate_trips_per_year(tracts_gdf, root=".", years=None, sample=SAMPLE_PER
         trips_gdf,
         tracts_gdf[["GEOID", "geometry"]],
         how="inner",
-        predicate="within",
+        predicate="intersects",
     )
 
     result = {}
@@ -633,7 +633,7 @@ _HTML_TEMPLATE = """\
     <h2>Data Availability</h2>
     {heatmap_html}
     <p class="note">
-      Colour intensity = trip count per period. Grey cells = no processed data.
+      Color intensity = trip count per period. Grey cells = no processed data.
       Annual files (2010–2017) appear in the January column.
     </p>
   </section>
@@ -642,7 +642,7 @@ _HTML_TEMPLATE = """\
     <h2>Trip-Start Density by Census Tract</h2>
     {choropleth_html}
     <p class="note">
-      Select a year from the dropdown. Colour = trip-start count per tract.
+      Select a year from the dropdown. Color = trip-start count per tract.
       Cartographic-boundary shapefiles downloaded via
       <a href="https://github.com/walker-data/pygris" target="_blank">pygris</a>
       / US Census Bureau (year {tract_year}).
