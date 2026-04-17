@@ -85,6 +85,14 @@ jobs:
             ${{ runner.os }}-r-4.4-pages-
             ${{ runner.os }}-r-4.4-
 
+      - name: Cache knitr chunk outputs
+        uses: actions/cache@v4
+        with:
+          path: cache
+          key: ${{ runner.os }}-rmd-cache-${{ hashFiles('analysis.Rmd', 'R/*.R') }}
+          restore-keys: |
+            ${{ runner.os }}-rmd-cache-
+
       - name: Install system dependencies
         run: |
           sudo apt-get update
