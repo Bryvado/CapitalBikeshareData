@@ -127,6 +127,25 @@ jobs:
             quiet      = FALSE
           )
 
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Cache Python packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('requirements_interactive.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
+      - name: Install Python dependencies
+        run: pip install -r requirements_interactive.txt
+
+      - name: Generate interactive profile → _site/interactive.html
+        run: python analysis_interactive.py --root . --output _site/interactive.html
+
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:
