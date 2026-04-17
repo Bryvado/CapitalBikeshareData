@@ -228,6 +228,44 @@ s3_key_master <- function(era = c("new", "old")) {
   s3_key("data", "master", paste0(era, "_era.parquet"))
 }
 
+#' S3 key for a per-month master partition file.
+#'
+#' Partitioned masters are stored under `data/master/{era}/{label}.parquet`
+#' where `label` is a period label such as "202509" or "2014".
+#'
+#' @param era   "old" or "new".
+#' @param label Period label (e.g. "202509").
+#' @export
+s3_key_master_partition <- function(era = c("new", "old"), label) {
+  era <- match.arg(era)
+  s3_key("data", "master", era, paste0(label, ".parquet"))
+}
+
+#' List all S3 object keys under a given prefix.
+#'
+#' Handles pagination so more than 1,000 objects are returned correctly.
+#'
+#' @param prefix S3 key prefix to list under.
+#' @return Character vector of S3 object keys (empty if none found).
+#' @export
+s3_list_keys <- function(prefix) {
+  prefix <- normalize_s3_key(prefix)
+  keys <- character()
+  continuation_token <- NULL
+  repeat {
+    args <- list(Bucket = s3_bucket(), Prefix = prefix, MaxKeys = 1000L)
+    if (!is.null(continuation_token))
+      args$ContinuationToken <- continuation_token
+    resp <- do.call(s3_client()$list_objects_v2, args)
+    if (length(resp$Contents) > 0L)
+      keys <- c(keys, vapply(resp$Contents, function(x) x$Key, character(1L)))
+    if (!isTRUE(resp$IsTruncated))
+      break
+    continuation_token <- resp$NextContinuationToken
+  }
+  keys
+}
+
 #' S3 key for a per-month processed parquet file.
 #'
 #' @param label Period label, e.g. "202405".

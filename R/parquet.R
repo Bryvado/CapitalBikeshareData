@@ -145,15 +145,17 @@ write_processed_parquet <- function(df, dest_dir, label) {
 
 #' Append a processed trip tibble to the correct master parquet file.
 #'
-#' In S3 mode the master is read from / written to the S3 bucket.
+#' In S3 mode the master is stored as **per-month partition files** under
+#' `data/master/{era}/{label}.parquet`, where `label` is derived from the
+#' `source_file` column (e.g. "202509").  Writing one partition at a time is
+#' orders-of-magnitude faster than reading and rewriting a growing monolithic
+#' file, and is naturally idempotent (overwriting the same key is safe).
+#'
 #' In local mode the original atomic temp-file pattern is used.
 #'
 #' The era ("old" or "new") is taken from the `era` column of `df`.
 #'
-#' Idempotency: rows whose `source_file` already appears in the master are
-#' removed before appending (so re-running the same month is safe).
-#'
-#' @param df   Enriched trip tibble containing an `era` column.
+#' @param df   Enriched trip tibble containing `era` and `source_file` columns.
 #' @param root Project root directory (used in local mode only).
 #' @export
 append_to_master <- function(df, root = ".") {
@@ -162,24 +164,33 @@ append_to_master <- function(df, root = ".") {
     stop("df contains rows from multiple eras; split before calling append_to_master()")
   era <- era[1L]
 
-  new_source_files <- unique(df$source_file)
-
   if (use_s3()) {
-    key <- s3_key_master(era)
-    if (s3_object_exists(key)) {
-      master <- s3_read_parquet(key)
-      master <- dplyr::filter(master, !source_file %in% new_source_files)
-    } else {
-      master <- tibble::tibble()
-    }
-    combined <- dplyr::bind_rows(master, df)
-    s3_write_parquet(combined, key)
-    logger::log_info("Master [{era}] updated in S3: {nrow(combined)} total rows ",
-                     "(+{nrow(df)} new)")
+    # Derive the period label from the source_file values.
+    # source_file is the CSV basename, e.g. "202509-capitalbikeshare-tripdata.csv"
+    # or "2014-capitalbikeshare-tripdata.csv" for annual files.
+    src_files <- unique(df$source_file)
+    labels <- regmatches(src_files, regexpr("^[0-9]+", src_files))
+    labels <- unique(labels[nzchar(labels)])
+    if (length(labels) == 0L)
+      stop("Cannot derive period label from source_file: ",
+           paste(src_files, collapse = ", "))
+    if (length(labels) > 1L)
+      stop("df contains source files from multiple periods (",
+           paste(labels, collapse = ", "),
+           "); split before calling append_to_master()")
+    label <- labels[1L]
+
+    key <- s3_key_master_partition(era, label)
+    s3_write_parquet(df, key)
+    logger::log_info(
+      "Master [{era}] partition written to S3: {nrow(df)} rows ",
+      "(label={label}) → s3://{s3_bucket()}/{key}"
+    )
     return(invisible(key))
   }
 
   # --- local mode ---
+  new_source_files <- unique(df$source_file)
   mpath <- master_path(era, root)
   fs::dir_create(dirname(mpath))
 
@@ -209,8 +220,14 @@ append_to_master <- function(df, root = ".") {
 
 #' Read a master parquet dataset.
 #'
-#' In S3 mode the master is read from the S3 bucket.
-#' In local mode it is read from the local `data/master/` directory.
+#' In S3 mode the master is assembled from per-month partition files stored
+#' under `data/master/{era}/` (the current format).  For backward
+#' compatibility, if a legacy monolithic `data/master/{era}_era.parquet`
+#' object exists it is combined with any partition files, with partition data
+#' taking precedence (rows sharing a `source_file` value with a partition are
+#' dropped from the monolithic file to avoid duplication).
+#'
+#' In local mode the master is read from the local `data/master/` directory.
 #'
 #' @param era  "old" or "new".
 #' @param root Project root (local mode only).
@@ -220,12 +237,60 @@ read_master <- function(era = c("new", "old"), root = ".") {
   era <- match.arg(era)
 
   if (use_s3()) {
-    key <- s3_key_master(era)
-    if (!s3_object_exists(key)) {
+    # ── 1. Collect per-month partition files (new format) ──────────────────
+    partition_prefix <- s3_key("data", "master", era, "")
+    partition_keys <- tryCatch(
+      s3_list_keys(partition_prefix),
+      error = function(e) {
+        logger::log_warn("Could not list master partitions: {conditionMessage(e)}")
+        character()
+      }
+    )
+    partition_keys <- partition_keys[endsWith(partition_keys, ".parquet")]
+
+    partitions <- vector("list", length(partition_keys))
+    for (i in seq_along(partition_keys)) {
+      partitions[[i]] <- tryCatch(
+        s3_read_parquet(partition_keys[[i]]),
+        error = function(e) {
+          logger::log_warn(
+            "Skipping unreadable partition {partition_keys[[i]]}: {conditionMessage(e)}"
+          )
+          NULL
+        }
+      )
+    }
+    partitions <- Filter(Negate(is.null), partitions)
+
+    # ── 2. Combine with legacy monolithic master (if present) ──────────────
+    mono_key <- s3_key_master(era)
+    if (s3_object_exists(mono_key)) {
+      mono <- tryCatch(
+        s3_read_parquet(mono_key),
+        error = function(e) {
+          logger::log_warn("Could not read legacy master: {conditionMessage(e)}")
+          NULL
+        }
+      )
+      if (!is.null(mono) && length(partitions) > 0L) {
+        # Drop rows from the monolithic master whose source_file already
+        # appears in any partition (avoids duplicates after migration).
+        partition_sources <- unique(unlist(lapply(partitions, function(p) {
+          if ("source_file" %in% names(p)) unique(p$source_file) else character()
+        })))
+        if (length(partition_sources) > 0L)
+          mono <- dplyr::filter(mono, !source_file %in% partition_sources)
+      }
+      if (!is.null(mono))
+        partitions <- c(list(mono), partitions)
+    }
+
+    if (length(partitions) == 0L) {
       logger::log_warn("Master [{era}] does not exist yet in S3")
       return(NULL)
     }
-    return(s3_read_parquet(key))
+
+    return(dplyr::bind_rows(partitions))
   }
 
   # --- local mode ---
