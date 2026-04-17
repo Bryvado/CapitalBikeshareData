@@ -220,7 +220,7 @@ trip_extent <- function(root = ".", sample = 500000L) {
 #' @return An `sf` object of census tracts.
 #' @export
 download_census_tracts <- function(extent = NULL, year = 2020L, cache = TRUE) {
-  tigris::options(use_tigris_cache = cache)
+  options(tigris_use_cache = cache)
 
   if (is.null(extent)) {
     extent <- list(xmin = -77.6, xmax = -76.8, ymin = 38.7, ymax = 39.2)
@@ -291,6 +291,16 @@ aggregate_trips_to_tracts <- function(root = ".", tracts_sf,
   if (length(coord_rows) == 0L) stop("No trip coordinate data found.")
 
   trips_df <- dplyr::bind_rows(coord_rows)
+
+  if (nrow(trips_df) == 0L) {
+    stop(
+      if (!is.null(year_filter))
+        paste0("No trip coordinate data found for year(s): ",
+               paste(sort(year_filter), collapse = ", "))
+      else
+        "No trip coordinate data found — coordinates may not have been enriched yet."
+    )
+  }
 
   trips_sf <- sf::st_as_sf(
     trips_df,
@@ -460,33 +470,49 @@ run_analysis <- function(root         = ".",
     "lat [{round(ext$ymin,4)}, {round(ext$ymax,4)}]"
   )
 
-  tracts_sf <- download_census_tracts(extent = ext, year = tract_year)
-
-  # --- Step 4: aggregate trips to tracts ---
-  tracts_with_trips <- tryCatch(
-    aggregate_trips_to_tracts(root       = root,
-                              tracts_sf  = tracts_sf,
-                              year_filter = year_filter,
-                              sample     = sample),
+  tracts_sf <- tryCatch(
+    download_census_tracts(extent = ext, year = tract_year),
     error = function(e) {
-      logger::log_warn("Trip aggregation failed: {conditionMessage(e)}. ",
-                       "Returning tracts without trip counts.")
-      dplyr::mutate(tracts_sf, n_trips = NA_integer_)
+      logger::log_warn("Census tract download failed: {conditionMessage(e)}. ",
+                       "Tract map will be skipped.")
+      NULL
     }
   )
 
-  # --- Step 5: map ---
-  map_title <- if (!is.null(year_filter)) {
-    paste0("Capital Bikeshare Trip Starts by Census Tract (",
-           paste(sort(year_filter), collapse = ", "), ")")
+  # --- Step 4: aggregate trips to tracts ---
+  if (is.null(tracts_sf)) {
+    tracts_with_trips <- NULL
   } else {
-    "Capital Bikeshare Trip Starts by Census Tract (All Years)"
+    tracts_with_trips <- tryCatch(
+      aggregate_trips_to_tracts(root       = root,
+                                tracts_sf  = tracts_sf,
+                                year_filter = year_filter,
+                                sample     = sample),
+      error = function(e) {
+        logger::log_warn("Trip aggregation failed: {conditionMessage(e)}. ",
+                         "Returning tracts without trip counts.")
+        dplyr::mutate(tracts_sf, n_trips = NA_integer_)
+      }
+    )
   }
 
-  tract_map  <- build_tract_map(tracts_with_trips, title = map_title)
-  map_path   <- file.path(plots_dir, "tract_trip_density_map.png")
-  ggplot2::ggsave(map_path, tract_map, width = 10, height = 10, dpi = 150)
-  logger::log_info("Saved tract map to {map_path}")
+  # --- Step 5: map ---
+  if (is.null(tracts_with_trips)) {
+    tract_map <- NULL
+    logger::log_warn("Tract map skipped — census tract data unavailable.")
+  } else {
+    map_title <- if (!is.null(year_filter)) {
+      paste0("Capital Bikeshare Trip Starts by Census Tract (",
+             paste(sort(year_filter), collapse = ", "), ")")
+    } else {
+      "Capital Bikeshare Trip Starts by Census Tract (All Years)"
+    }
+
+    tract_map  <- build_tract_map(tracts_with_trips, title = map_title)
+    map_path   <- file.path(plots_dir, "tract_trip_density_map.png")
+    ggplot2::ggsave(map_path, tract_map, width = 10, height = 10, dpi = 150)
+    logger::log_info("Saved tract map to {map_path}")
+  }
 
   logger::log_info("=== Capital Bikeshare Analysis COMPLETE ===")
 
