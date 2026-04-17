@@ -1,0 +1,116 @@
+---
+title: "Capital Bikeshare — Data Dashboard"
+date: "`r format(Sys.Date(), '%B %d, %Y')`"
+output:
+  html_document:
+    theme: flatly
+    highlight: tango
+    self_contained: true
+    toc: true
+    toc_float:
+      collapsed: false
+    fig_width: 12
+    fig_height: 7
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo    = FALSE,
+  message = FALSE,
+  warning = FALSE
+)
+source("R/analysis.R")
+```
+
+---
+
+## Data availability
+
+The heatmap below shows every year-month period that has been successfully
+downloaded and processed.  Colour intensity reflects trip volume; grey cells
+indicate periods where no file was processed.  Annual files (2010–2017) appear
+in the **January** column.
+
+```{r availability-chart, fig.height=7}
+avail <- summarize_data_availability()
+
+if (nrow(avail) == 0L) {
+  cat("> **No processed data found.**",
+      "Run `run_pipeline(all_available = TRUE)` first.")
+} else {
+  knitr::kable(
+    avail |>
+      dplyr::summarise(
+        `First period` = min(paste0(year, "-", sprintf("%02d", month))),
+        `Last period`  = max(paste0(year, "-", sprintf("%02d", month))),
+        `Periods`      = dplyr::n(),
+        `Total trips`  = scales::comma(sum(n_trips, na.rm = TRUE))
+      ),
+    caption = "Coverage summary"
+  ) |> print()
+
+  print(build_availability_chart(avail))
+}
+```
+
+---
+
+## Trip density by census tract
+
+Trip **start** coordinates are spatially joined to 2020 US Census tracts
+covering the Capital Bikeshare service area (Washington D.C., Maryland, and
+Virginia).  Tract boundaries are downloaded via the
+[`tigris`](https://github.com/walkerke/tigris) package using the data's
+own geographic extent.  Colour is log-scaled.
+
+```{r tract-map, fig.width=10, fig.height=10}
+ext <- tryCatch(
+  trip_extent(),
+  error = function(e) {
+    message("Could not compute extent: ", conditionMessage(e),
+            " — using default service-area bounding box.")
+    list(xmin = -77.6, xmax = -76.8, ymin = 38.7, ymax = 39.2)
+  }
+)
+
+tracts_sf <- download_census_tracts(extent = ext, year = 2020L)
+
+tracts_counts <- tryCatch(
+  aggregate_trips_to_tracts(tracts_sf = tracts_sf),
+  error = function(e) {
+    message("Trip aggregation failed: ", conditionMessage(e))
+    tracts_sf$n_trips <- NA_integer_
+    tracts_sf
+  }
+)
+
+print(build_tract_map(tracts_counts))
+```
+
+---
+
+## Per-year trip counts
+
+```{r yearly-table}
+if (nrow(avail) > 0L) {
+  yearly <- avail |>
+    dplyr::group_by(year) |>
+    dplyr::summarise(
+      months_available = dplyr::n(),
+      total_trips      = sum(n_trips, na.rm = TRUE),
+      .groups = "drop"
+    ) |>
+    dplyr::mutate(total_trips = scales::comma(total_trips))
+
+  knitr::kable(
+    yearly,
+    col.names = c("Year", "Periods available", "Total trips"),
+    caption   = "Annual trip totals (processed periods only)"
+  )
+}
+```
+
+---
+
+*Generated automatically by the
+[Capital Bikeshare pipeline](https://github.com/Bryvado/CapitalBikeshareData).*

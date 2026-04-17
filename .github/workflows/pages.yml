@@ -1,0 +1,145 @@
+# .github/workflows/pages.yml
+# ---------------------------------------------------------------------------
+# Renders analysis.Rmd to HTML and deploys it to GitHub Pages.
+#
+# Triggers:
+#   - Automatically after the Monthly Pipeline workflow completes successfully.
+#   - Manually via the Actions tab (workflow_dispatch).
+#   - On push to main that touches the analysis files.
+#
+# Required repository secrets (same as monthly_pipeline.yml):
+#   CBS_S3_BUCKET      – S3 bucket that holds the master parquets
+#   AWS_ROLE_TO_ASSUME – IAM role ARN for GitHub OIDC
+#
+# Required repository variables:
+#   AWS_REGION         – AWS region of the bucket
+#   CBS_S3_PREFIX      – (optional) key prefix inside the bucket
+#
+# GitHub Pages setup (one-time):
+#   Settings → Pages → Source → "GitHub Actions"
+# ---------------------------------------------------------------------------
+
+name: Build & Deploy Analysis Dashboard
+
+on:
+  workflow_run:
+    workflows: ["Monthly Capital Bikeshare Pipeline"]
+    types: [completed]
+  push:
+    branches: [main]
+    paths:
+      - "analysis.Rmd"
+      - "R/analysis.R"
+      - "R/parquet.R"
+      - "R/storage.R"
+      - "R/utils.R"
+  workflow_dispatch:
+
+# Only one Pages deployment at a time; newer runs cancel older pending ones.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+jobs:
+  # ── Job 1: render the Rmd ─────────────────────────────────────────────────
+  build:
+    # Skip if triggered by a failed pipeline run
+    if: >-
+      github.event_name != 'workflow_run' ||
+      github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    env:
+      CBS_S3_BUCKET: ${{ secrets.CBS_S3_BUCKET }}
+      CBS_S3_PREFIX: ${{ vars.CBS_S3_PREFIX }}
+      AWS_REGION:    ${{ vars.AWS_REGION }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Set up R
+        uses: r-lib/actions/setup-r@v2
+        with:
+          r-version: '4.4'
+          use-public-rspm: true
+
+      - name: Cache R packages
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.R_LIBS_USER }}
+          key: ${{ runner.os }}-r-4.4-pages-${{ hashFiles('R/*.R', 'analysis.Rmd') }}
+          restore-keys: |
+            ${{ runner.os }}-r-4.4-pages-
+            ${{ runner.os }}-r-4.4-
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libcurl4-openssl-dev \
+            libgdal-dev \
+            libgeos-dev \
+            libproj-dev \
+            libssl-dev \
+            pkg-config \
+            pandoc
+
+      - name: Install R packages
+        shell: Rscript {0}
+        run: |
+          needed <- c(
+            # Pipeline / analysis modules
+            "httr2", "arrow", "dplyr", "readr", "lubridate",
+            "stringr", "stringdist", "jsonlite", "logger",
+            "fs", "tibble", "paws.storage",
+            # Analysis extras
+            "sf", "tigris", "ggplot2", "scales", "tidyr",
+            # Rmd rendering
+            "rmarkdown", "knitr"
+          )
+          missing_pkgs <- needed[!needed %in% installed.packages()[, "Package"]]
+          if (length(missing_pkgs) > 0L) {
+            install.packages(missing_pkgs, repos = "https://cloud.r-project.org")
+          }
+
+      - name: Render analysis.Rmd → _site/index.html
+        shell: Rscript {0}
+        run: |
+          fs::dir_create("_site")
+          rmarkdown::render(
+            input      = "analysis.Rmd",
+            output_dir = "_site",
+            output_file = "index.html",
+            quiet      = FALSE
+          )
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site/
+
+  # ── Job 2: deploy to GitHub Pages ─────────────────────────────────────────
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

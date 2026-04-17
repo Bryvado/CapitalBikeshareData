@@ -217,9 +217,10 @@ poll_until_available <- function(url,
 #' @param url       Full S3 URL.
 #' @param dest_dir  Local directory for the ZIP and extracted files.
 #' @param n_retries Number of download retries on transient failure.
+#' @param overwrite Logical; whether extracted files may overwrite existing files.
 #' @return Character vector of extracted file paths.
 #' @export
-download_and_unzip <- function(url, dest_dir, n_retries = 3L) {
+download_and_unzip <- function(url, dest_dir, n_retries = 3L, overwrite = TRUE) {
   fs::dir_create(dest_dir)
   zip_file <- file.path(dest_dir, basename(url))
 
@@ -239,7 +240,43 @@ download_and_unzip <- function(url, dest_dir, n_retries = 3L) {
     logger::log_info("ZIP already present, skipping download: {zip_file}")
   }
 
-  extracted <- unzip(zip_file, exdir = dest_dir)
+  extracted <- unzip(zip_file, exdir = dest_dir, overwrite = overwrite)
   logger::log_info("Extracted {length(extracted)} file(s) to {dest_dir}")
   extracted
+}
+
+#' Extract an existing local ZIP file into a destination directory.
+#'
+#' @param zip_file  Path to an existing local ZIP file.
+#' @param dest_dir  Local directory for extracted files.
+#' @param overwrite Logical; whether extracted files may overwrite existing files.
+#' @return Character vector of extracted file paths.
+#' @export
+unzip_existing_zip <- function(zip_file, dest_dir, overwrite = TRUE) {
+  if (!fs::file_exists(zip_file)) {
+    stop(sprintf(
+      "ZIP file does not exist: %s. Download it first with download_and_unzip().",
+      zip_file
+    ))
+  }
+  fs::dir_create(dest_dir)
+  zip_listing <- unzip(zip_file, list = TRUE)
+  zip_file_entries <- zip_listing$Name[!endsWith(zip_listing$Name, "/")]
+  expected_file_paths <- file.path(dest_dir, zip_file_entries)
+  zip_csv_entries <- zip_listing$Name[
+    grepl("\\.csv$", zip_listing$Name, ignore.case = TRUE) &
+      !startsWith(basename(zip_listing$Name), "._")
+  ]
+  expected_csv_paths <- file.path(dest_dir, zip_csv_entries)
+
+  if (length(expected_csv_paths) > 0L &&
+      all(fs::file_exists(expected_csv_paths))) {
+    logger::log_info("Expected CSV files already extracted in {dest_dir} — skipping extraction")
+    # Return only the verified CSV paths so callers receive consistent,
+    # existing-file paths regardless of whether non-CSV entries were extracted.
+    return(expected_csv_paths)
+  }
+  extracted <- unzip(zip_file, exdir = dest_dir, overwrite = overwrite)
+  logger::log_info("Extracted {length(extracted)} file(s) from existing ZIP to {dest_dir}")
+  expected_file_paths[fs::file_exists(expected_file_paths)]
 }

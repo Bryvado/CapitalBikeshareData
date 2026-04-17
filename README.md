@@ -17,7 +17,8 @@ The pipeline supports two storage backends:
 CapitalBikeshareData/
 ├── .github/
 │   └── workflows/
-│       └── monthly_pipeline.yml  # Scheduled GitHub Actions workflow
+│       ├── monthly_pipeline.yml  # Scheduled pipeline workflow
+│       └── pages.yml             # GitHub Pages build & deploy workflow
 ├── R/
 │   ├── utils.R          # Logging, retry, path helpers
 │   ├── storage.R        # S3 abstraction layer (use_s3(), key helpers, locking)
@@ -26,6 +27,7 @@ CapitalBikeshareData/
 │   ├── enrichment.R     # GBFS station reference, coordinate fill, ride_type
 │   ├── parquet.R        # Manifest, per-month parquet, master append
 │   ├── pipeline.R       # Top-level orchestrator (calls all modules)
+│   ├── analysis.R       # Data availability summary + census-tract trip map
 │   └── scheduler.R      # cronR / taskscheduleR scheduling helpers
 ├── data/
 │   ├── raw/             # Downloaded ZIPs and extracted CSVs (per label sub-dir)
@@ -35,6 +37,7 @@ CapitalBikeshareData/
 ├── logs/
 │   └── pipeline.log     # Unified log file (appended each run)
 ├── manifest.csv         # Processing manifest (idempotency record)
+├── analysis.Rmd         # R Markdown report rendered to GitHub Pages
 └── run_cbs_pipeline.R   # Auto-generated monthly driver script
 ```
 
@@ -59,6 +62,7 @@ Install once:
 
 ```r
 install.packages(c(
+  # Pipeline
   "httr2",        # HTTP requests (S3 polling + GBFS)
   "arrow",        # Parquet I/O
   "dplyr",        # Data manipulation
@@ -70,6 +74,12 @@ install.packages(c(
   "logger",       # Structured logging
   "fs",           # File-system utilities
   "tibble",       # Tibble construction
+  # Analysis (R/analysis.R)
+  "sf",           # Spatial data manipulation
+  "tigris",       # US Census tract / boundary downloads
+  "ggplot2",      # Plotting
+  "scales",       # Axis / legend label formatting
+  "tidyr",        # replace_na
   # S3 backend (only needed when CBS_S3_BUCKET is set):
   "paws.storage", # AWS SDK for R — S3 operations
   # Scheduling (choose one based on OS):
@@ -111,6 +121,92 @@ run_pipeline(year = 2012, month = 1)
 source("R/pipeline.R")
 run_pipeline(all_available = TRUE)
 ```
+
+---
+
+## Analysis — data availability & census-tract map
+
+After the pipeline has populated the master parquet files, the analysis module
+(`R/analysis.R`) can:
+
+1. Read the manifest and parquet files to produce a **year × month availability
+   heatmap** showing how many trips are in each processed period.
+2. Determine the **geographic extent** of all trip start/end coordinates.
+3. Download the **US Census tracts** that overlap that extent via
+   [`tigris`](https://github.com/walkerke/tigris).
+4. Spatially join trip starts to tracts and produce a **choropleth map** of
+   trip density.
+
+Both plots are saved as PNGs in `data/plots/` when running locally, and are
+embedded directly in the HTML report when rendered via GitHub Pages.
+
+### GitHub Pages — live dashboard
+
+The analysis report is published automatically to **GitHub Pages** after every
+successful pipeline run.  The page is rendered from `analysis.Rmd` by the
+`.github/workflows/pages.yml` workflow.
+
+#### One-time setup
+
+1. Go to **Settings → Pages** in your fork.
+2. Set **Source** to **"GitHub Actions"** (not a branch/folder).
+3. Ensure the same `CBS_S3_BUCKET`, `AWS_ROLE_TO_ASSUME`, `AWS_REGION` secrets
+   and variables are set (shared with the pipeline workflow).
+
+Once configured, the dashboard will be live at:
+
+```
+https://<your-github-username>.github.io/<repo-name>/
+```
+
+and will refresh automatically every time the monthly pipeline finishes.
+
+### Run the full analysis
+
+```r
+source("R/analysis.R")
+results <- run_analysis()
+```
+
+### Run for specific years only
+
+```r
+source("R/analysis.R")
+results <- run_analysis(year_filter = 2022:2024)
+```
+
+### Access individual components
+
+```r
+source("R/analysis.R")
+
+# 1. What year-months are available, and how many trips each?
+avail <- summarize_data_availability()
+print(avail)
+
+# 2. Bounding box of all trip coordinates
+ext <- trip_extent()
+
+# 3. Download census tracts for the service area
+tracts <- download_census_tracts(extent = ext, year = 2020)
+
+# 4. Aggregate trip starts to tracts
+tracts_with_counts <- aggregate_trips_to_tracts(tracts_sf = tracts)
+
+# 5. Build plots manually
+chart <- build_availability_chart(avail)
+map   <- build_tract_map(tracts_with_counts)
+```
+
+### `run_analysis()` parameters
+
+| Parameter | Default | Description |
+|---|---|---|
+| `root` | `"."` | Project root |
+| `tract_year` | `2020` | Decennial census year for tract boundaries |
+| `year_filter` | `NULL` | Integer vector of years to map; NULL = all years |
+| `plots_dir` | `data/plots/` | Output directory for saved PNGs |
+| `sample` | `1000000` | Max rows per era in `run_analysis()` (passed to aggregation & extent steps; `trip_extent()` uses `500000` by default when called directly) |
 
 ---
 

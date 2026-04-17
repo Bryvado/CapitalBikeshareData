@@ -136,18 +136,30 @@ run_pipeline <- function(year           = NULL,
   }
   downloaded_at <- Sys.time()
 
+  dest_raw <- raw_dir(label, root)
+  zip_file <- file.path(dest_raw, fname)
+
   # ------------------------------------------------------------------
-  # 3. Poll until available
+  # 3. Poll until available (unless already downloaded locally)
   # ------------------------------------------------------------------
-  poll_until_available(url,
-                       interval_secs = poll_interval,
-                       timeout_secs  = poll_timeout)
+  already_downloaded <- fs::file_exists(zip_file)
+
+  if (already_downloaded) {
+    logger::log_info("ZIP already downloaded locally: {zip_file} — skipping availability poll")
+  } else {
+    poll_until_available(url,
+                         interval_secs = poll_interval,
+                         timeout_secs  = poll_timeout)
+  }
 
   # ------------------------------------------------------------------
   # 4. Download and unzip
   # ------------------------------------------------------------------
-  dest_raw <- raw_dir(label, root)
-  extracted_files <- download_and_unzip(url, dest_raw)
+  extracted_files <- if (already_downloaded) {
+    unzip_existing_zip(zip_file, dest_raw, overwrite = TRUE)
+  } else {
+    download_and_unzip(url, dest_raw, overwrite = TRUE)
+  }
   csv_files <- extracted_files[grepl("\\.csv$", extracted_files,
                                      ignore.case = TRUE)]
   is_macos_metadata <- startsWith(basename(csv_files), "._")
