@@ -34,6 +34,11 @@ on:
         required: false
         default: false
         type: boolean
+      force_unlock:
+        description: 'Force-clear a stuck pipeline lock before running'
+        required: false
+        default: false
+        type: boolean
 
 concurrency:
   group: monthly-capital-bikeshare-pipeline
@@ -52,6 +57,8 @@ jobs:
       CBS_S3_BUCKET:            ${{ secrets.CBS_S3_BUCKET }}
       CBS_S3_PREFIX:            ${{ vars.CBS_S3_PREFIX }}
       AWS_REGION:               ${{ vars.AWS_REGION }}
+      # Derived lock key — used by force-clear and release steps
+      CBS_LOCK_S3_KEY:          ${{ vars.CBS_S3_PREFIX != '' && format('{0}/locks/pipeline.lock', vars.CBS_S3_PREFIX) || 'locks/pipeline.lock' }}
 
     steps:
       - name: Checkout repository
@@ -95,6 +102,13 @@ jobs:
             install.packages(missing_pkgs, repos = "https://cloud.r-project.org")
           }
 
+      - name: Force-clear pipeline lock (if requested)
+        if: ${{ inputs.force_unlock == true }}
+        shell: bash
+        run: |
+          echo "Force-clearing lock: s3://${CBS_S3_BUCKET}/${CBS_LOCK_S3_KEY}"
+          aws s3 rm "s3://${CBS_S3_BUCKET}/${CBS_LOCK_S3_KEY}" || true
+
       - name: Run pipeline (with retry)
         shell: bash
         env:
@@ -118,3 +132,10 @@ jobs:
           done
           echo "Pipeline failed after 3 attempts."
           exit 1
+
+      - name: Release pipeline lock
+        if: always()
+        shell: bash
+        run: |
+          aws s3 rm "s3://${CBS_S3_BUCKET}/${CBS_LOCK_S3_KEY}" --quiet || true
+          echo "Pipeline lock released (or was not held)."
