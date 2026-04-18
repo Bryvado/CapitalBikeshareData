@@ -252,6 +252,17 @@ def summarize_availability(root="."):
             monthly_counts["era"] = era_val
             expanded_parts.append(monthly_counts[["year", "month", "n_trips", "era"]])
 
+            covered_years = set(monthly_counts["year"].astype(int).unique().tolist())
+            missing_years = sorted(set(years_needed) - covered_years)
+            if missing_years:
+                fallback_missing = era_annual[
+                    era_annual["year"].astype(int).isin(missing_years)
+                ].copy()
+                fallback_missing["month"] = 1
+                expanded_parts.append(
+                    fallback_missing[["year", "month", "n_trips", "era"]]
+                )
+
         if expanded_parts:
             avail = pd.concat([avail] + expanded_parts, ignore_index=True)
 
