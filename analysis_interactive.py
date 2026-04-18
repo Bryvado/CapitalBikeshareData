@@ -137,10 +137,36 @@ def read_master(era, root="."):
         except Exception:
             return None
 
-    path = Path(root) / "data" / "master" / f"{era}_era.parquet"
-    if not path.exists():
+    master_dir = Path(root) / "data" / "master"
+    partition_dir = master_dir / era
+    partition_paths = sorted(partition_dir.glob("*.parquet")) if partition_dir.exists() else []
+    partitions = []
+    for p in partition_paths:
+        try:
+            partitions.append(pq.read_table(str(p)).to_pandas())
+        except Exception:
+            pass
+
+    mono_path = master_dir / f"{era}_era.parquet"
+    mono = None
+    if mono_path.exists():
+        try:
+            mono = pq.read_table(str(mono_path)).to_pandas()
+        except Exception:
+            mono = None
+
+    if mono is not None and partitions and "source_file" in mono.columns:
+        partition_sources = []
+        for part in partitions:
+            if "source_file" in part.columns:
+                partition_sources.extend(part["source_file"].dropna().astype(str).unique().tolist())
+        if partition_sources:
+            mono = mono[~mono["source_file"].astype(str).isin(set(partition_sources))]
+
+    pieces = ([] if mono is None else [mono]) + partitions
+    if not pieces:
         return None
-    return pq.read_table(str(path)).to_pandas()
+    return pd.concat(pieces, ignore_index=True)
 
 
 # ---------------------------------------------------------------------------
