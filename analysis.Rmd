@@ -34,7 +34,7 @@ The heatmap below shows every year-month period that has been successfully
 downloaded and processed.  Colour intensity reflects trip volume; grey cells
 indicate periods where no file was processed.
 
-```{r availability-chart, fig.height=7}
+```{r availability-chart, fig.height=7, cache=FALSE}
 avail <- summarize_data_availability()
 
 if (nrow(avail) == 0L) {
