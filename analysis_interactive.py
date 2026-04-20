@@ -137,10 +137,40 @@ def read_master(era, root="."):
         except Exception:
             return None
 
-    path = Path(root) / "data" / "master" / f"{era}_era.parquet"
-    if not path.exists():
+    master_dir = Path(root) / "data" / "master"
+    partition_dir = master_dir / era
+    partition_paths = (
+        sorted(p for p in partition_dir.rglob("*.parquet") if p.is_file())
+        if partition_dir.exists()
+        else []
+    )
+    partitions = []
+    for p in partition_paths:
+        try:
+            partitions.append(pq.read_table(str(p)).to_pandas())
+        except Exception:
+            pass
+
+    mono_path = master_dir / f"{era}_era.parquet"
+    mono = None
+    if mono_path.exists():
+        try:
+            mono = pq.read_table(str(mono_path)).to_pandas()
+        except Exception:
+            mono = None
+
+    if mono is not None and partitions and "source_file" in mono.columns:
+        partition_sources = []
+        for part in partitions:
+            if "source_file" in part.columns:
+                partition_sources.extend(part["source_file"].dropna().astype(str).unique().tolist())
+        if partition_sources:
+            mono = mono[~mono["source_file"].astype(str).isin(set(partition_sources))]
+
+    pieces = ([] if mono is None else [mono]) + partitions
+    if not pieces:
         return None
-    return pq.read_table(str(path)).to_pandas()
+    return pd.concat(pieces, ignore_index=True)
 
 
 # ---------------------------------------------------------------------------
@@ -169,7 +199,7 @@ def summarize_availability(root="."):
         lambda p: int(p[:4]) if len(p) in (4, 6) else None
     )
     ok["month"] = ok["period"].apply(
-        lambda p: 1 if len(p) == 4 else (int(p[4:6]) if len(p) == 6 else None)
+        lambda p: None if len(p) == 4 else (int(p[4:6]) if len(p) == 6 else None)
     )
     ok["n_trips"] = (
         pd.to_numeric(ok.get("rows", pd.Series(dtype=int)), errors="coerce")
@@ -182,9 +212,59 @@ def summarize_availability(root="."):
         .dropna(subset=["year", "month"])
         .copy()
     )
+
+    # Expand annual periods (YYYY labels, primarily 2010–2017) into true
+    # per-month counts using master parquet timestamps so the interactive
+    # availability heatmap matches the static report.
+    annual_rows = ok[ok["period"].str.len() == 4][["year", "era", "n_trips"]].dropna(subset=["year", "era"]).copy()
+    if not annual_rows.empty:
+        expanded_parts = []
+        for era_val, era_annual in annual_rows.groupby("era"):
+            years_needed = sorted(era_annual["year"].astype(int).unique().tolist())
+            master = read_master(era_val, root)
+            if master is None or master.empty or "started_at" not in master.columns:
+                fallback = era_annual.copy()
+                fallback["month"] = 1
+                expanded_parts.append(fallback[["year", "month", "n_trips", "era"]])
+                continue
+
+            started = pd.to_datetime(master["started_at"], utc=True, errors="coerce")
+            monthly_counts = (
+                pd.DataFrame({"started_at": started})
+                .dropna()
+                .assign(
+                    year=lambda d: d["started_at"].dt.year.astype(int),
+                    month=lambda d: d["started_at"].dt.month.astype(int),
+                )
+            )
+            monthly_counts = monthly_counts[monthly_counts["year"].isin(years_needed)]
+            if monthly_counts.empty:
+                fallback = era_annual.copy()
+                fallback["month"] = 1
+                expanded_parts.append(fallback[["year", "month", "n_trips", "era"]])
+                continue
+
+            monthly_counts = (
+                monthly_counts.groupby(["year", "month"])
+                .size()
+                .reset_index(name="n_trips")
+            )
+            monthly_counts["era"] = era_val
+            expanded_parts.append(monthly_counts[["year", "month", "n_trips", "era"]])
+
+        if expanded_parts:
+            avail = pd.concat([avail] + expanded_parts, ignore_index=True)
+
     avail["year"] = avail["year"].astype(int)
     avail["month"] = avail["month"].astype(int)
-    return avail.sort_values(["year", "month"]).reset_index(drop=True)
+    avail["n_trips"] = pd.to_numeric(avail["n_trips"], errors="coerce").fillna(0).astype(int)
+    avail = (
+        avail.groupby(["year", "month", "era"], as_index=False)["n_trips"]
+        .sum()
+        .sort_values(["year", "month"])
+        .reset_index(drop=True)
+    )
+    return avail
 
 
 # ---------------------------------------------------------------------------
@@ -227,6 +307,80 @@ def download_census_tracts(year=TRACT_YEAR, bbox=None, cache=True):
 
 def _load_trip_coords(root, sample):
     """Load start-lat/lng + year from master parquets; return a single DataFrame."""
+    def _coerce_started_at(series):
+        """
+        Parse mixed started_at formats robustly.
+
+        Handles ISO strings and numeric unix timestamps (seconds/ms/us/ns).
+        """
+        dt = pd.to_datetime(series, utc=True, errors="coerce")
+        num = pd.to_numeric(series, errors="coerce")
+        numeric_mask = num.notna()
+        if not numeric_mask.any():
+            return dt
+
+        plausible = dt.dt.year.between(2005, 2035, inclusive="both").fillna(False)
+        need_fix = numeric_mask & (~plausible)
+        if not need_fix.any():
+            return dt
+
+        best_unit = None
+        best_score = -1
+        for unit in ("s", "ms", "us", "ns"):
+            cand = pd.to_datetime(num[need_fix], unit=unit, utc=True, errors="coerce")
+            score = cand.dt.year.between(2005, 2035, inclusive="both").sum()
+            if score > best_score:
+                best_score = score
+                best_unit = unit
+
+        if best_unit is not None and best_score > 0:
+            repaired = pd.to_datetime(num[need_fix], unit=best_unit, utc=True, errors="coerce")
+            dt.loc[need_fix] = repaired
+
+        return dt
+
+    def _sample_preserving_years(df, n):
+        """Sample up to *n* rows while preserving representation for every year."""
+        if n is None or len(df) <= n:
+            return df
+
+        by_year = df.dropna(subset=["year"]).groupby("year")
+        year_counts = by_year.size().sort_index()
+        if year_counts.empty:
+            return df.sample(n, random_state=42)
+
+        # Allocate samples proportionally with at least one row per year.
+        alloc = (year_counts / year_counts.sum() * n).astype(int).clip(lower=1)
+
+        # Trim any overallocation by reducing the largest allocations first.
+        overflow = int(alloc.sum() - n)
+        if overflow > 0:
+            for yr in alloc.sort_values(ascending=False).index.tolist():
+                if overflow <= 0:
+                    break
+                reducible = max(alloc.loc[yr] - 1, 0)
+                if reducible > 0:
+                    step = min(reducible, overflow)
+                    alloc.loc[yr] -= step
+                    overflow -= step
+
+        # If under target due to rounding, top up largest years.
+        shortfall = int(n - alloc.sum())
+        if shortfall > 0:
+            for yr in year_counts.sort_values(ascending=False).index.tolist():
+                if shortfall <= 0:
+                    break
+                alloc.loc[yr] += 1
+                shortfall -= 1
+
+        sampled_parts = []
+        for yr, grp in by_year:
+            take = min(int(alloc.get(yr, 0)), len(grp))
+            if take > 0:
+                sampled_parts.append(grp.sample(take, random_state=42))
+
+        return pd.concat(sampled_parts, ignore_index=True) if sampled_parts else df.sample(n, random_state=42)
+
     parts = []
     for era in ("old", "new"):
         df = read_master(era, root)
@@ -236,10 +390,10 @@ def _load_trip_coords(root, sample):
         if len(need) < 3:
             continue
         df = df[list(need)].dropna(subset=["start_lat", "start_lng"]).copy()
-        df["started_at"] = pd.to_datetime(df["started_at"], utc=True, errors="coerce")
+        df["started_at"] = _coerce_started_at(df["started_at"])
         df["year"] = df["started_at"].dt.year
         if sample and len(df) > sample:
-            df = df.sample(sample, random_state=42)
+            df = _sample_preserving_years(df, sample)
         parts.append(df[["year", "start_lat", "start_lng"]])
 
     if not parts:
