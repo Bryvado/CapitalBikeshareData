@@ -303,6 +303,48 @@ def download_census_tracts(year=TRACT_YEAR, bbox=None, cache=True):
 
 def _load_trip_coords(root, sample):
     """Load start-lat/lng + year from master parquets; return a single DataFrame."""
+    def _sample_preserving_years(df, n):
+        """Sample up to *n* rows while preserving representation for every year."""
+        if n is None or len(df) <= n:
+            return df
+
+        by_year = df.dropna(subset=["year"]).groupby("year")
+        year_counts = by_year.size().sort_index()
+        if year_counts.empty:
+            return df.sample(n, random_state=42)
+
+        # Allocate samples proportionally with at least one row per year.
+        alloc = (year_counts / year_counts.sum() * n).astype(int).clip(lower=1)
+
+        # Trim any overallocation by reducing the largest allocations first.
+        overflow = int(alloc.sum() - n)
+        if overflow > 0:
+            for yr in alloc.sort_values(ascending=False).index.tolist():
+                if overflow <= 0:
+                    break
+                reducible = max(alloc.loc[yr] - 1, 0)
+                if reducible > 0:
+                    step = min(reducible, overflow)
+                    alloc.loc[yr] -= step
+                    overflow -= step
+
+        # If under target due to rounding, top up largest years.
+        shortfall = int(n - alloc.sum())
+        if shortfall > 0:
+            for yr in year_counts.sort_values(ascending=False).index.tolist():
+                if shortfall <= 0:
+                    break
+                alloc.loc[yr] += 1
+                shortfall -= 1
+
+        sampled_parts = []
+        for yr, grp in by_year:
+            take = min(int(alloc.get(yr, 0)), len(grp))
+            if take > 0:
+                sampled_parts.append(grp.sample(take, random_state=42))
+
+        return pd.concat(sampled_parts, ignore_index=True) if sampled_parts else df.sample(n, random_state=42)
+
     parts = []
     for era in ("old", "new"):
         df = read_master(era, root)
@@ -315,7 +357,7 @@ def _load_trip_coords(root, sample):
         df["started_at"] = pd.to_datetime(df["started_at"], utc=True, errors="coerce")
         df["year"] = df["started_at"].dt.year
         if sample and len(df) > sample:
-            df = df.sample(sample, random_state=42)
+            df = _sample_preserving_years(df, sample)
         parts.append(df[["year", "start_lat", "start_lng"]])
 
     if not parts:
