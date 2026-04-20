@@ -139,11 +139,7 @@ def read_master(era, root="."):
 
     master_dir = Path(root) / "data" / "master"
     partition_dir = master_dir / era
-    partition_paths = (
-        sorted(p for p in partition_dir.rglob("*.parquet") if p.is_file())
-        if partition_dir.exists()
-        else []
-    )
+    partition_paths = sorted(partition_dir.glob("*.parquet")) if partition_dir.exists() else []
     partitions = []
     for p in partition_paths:
         try:
