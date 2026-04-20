@@ -144,6 +144,7 @@ def read_master(era, root="."):
         if partition_dir.exists()
         else []
     )
+    partition_paths = sorted(partition_dir.glob("*.parquet")) if partition_dir.exists() else []
     partitions = []
     for p in partition_paths:
         try:
